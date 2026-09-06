@@ -128,7 +128,9 @@
 
   .field-label{font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:var(--chalk-dim); margin-bottom:8px; display:block;}
   .config-grid{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
-  @media(max-width:640px){.config-grid{grid-template-columns:1fr;}}
+  .seance-row1{display:grid; grid-template-columns:110px 160px; gap:16px;}
+  .seance-row2{display:grid; grid-template-columns:1fr 1.3fr 2.2fr; gap:16px; margin-top:16px; align-items:start;}
+  @media(max-width:640px){.config-grid{grid-template-columns:1fr;} .seance-row2{grid-template-columns:1fr;} .seance-row1{grid-template-columns:1fr 1fr;}}
 
   select, input[type=number], input[type=text], input[type=date]{
     background:rgba(255,255,255,0.04); border:1px solid var(--line-strong); color:var(--chalk);
@@ -214,6 +216,34 @@
   <section class="tab active" id="tab-creer">
 
     <div class="board-panel">
+      <h2>Séance</h2>
+      <div class="seance-row1">
+        <div>
+          <span class="field-label">N° entraînement</span>
+          <input type="number" id="seance-num" min="1" style="width:100%;">
+        </div>
+        <div>
+          <span class="field-label">Date</span>
+          <input type="date" id="week-date" style="width:100%;">
+        </div>
+      </div>
+      <div class="seance-row2">
+        <div>
+          <span class="field-label">Phase de jeu</span>
+          <select id="seance-phase" style="width:100%;"></select>
+        </div>
+        <div>
+          <span class="field-label">Principe de jeu</span>
+          <select id="seance-principe" style="width:100%;"></select>
+        </div>
+        <div>
+          <span class="field-label">Thème de la séance</span>
+          <input type="text" id="seance-theme" placeholder="ex : finition, transitions rapides…" style="width:100%;">
+        </div>
+      </div>
+    </div>
+
+    <div class="board-panel">
       <h2>1 · Joueurs présents</h2>
       <div class="chip-row" id="present-list"></div>
       <div class="actions-row" style="margin-top:10px;">
@@ -260,7 +290,6 @@
       </div>
       <div class="groups-grid" id="groups-grid"></div>
       <div class="actions-row">
-        <input type="date" id="week-date">
         <button class="btn primary" id="btn-validate">Valider et enregistrer la semaine</button>
       </div>
       <p class="status-msg" id="save-status"></p>
@@ -307,7 +336,7 @@
 <script>
 /* ---------- Données de base ---------- */
 const PLAYERS = ["Hadi","Sebastien","Mickaël","Bakoutoubo","Sacha","Keys","Nourou","Yanis","Mathis","Ethan",
-  "Abdoul Karim","Jalil","Gabin","Adam","Kalifa","Bilel","Pablo","Melih","Issam","Emir","Loan","Sarah"];
+  "Abdoul Karim","Jalil","Gabin","Adam","Kalifa","Bilel","Pablo","Melih","Issam","Emir","Loan","Sarah","Selyan"];
 
 const ATTRS = [
   {key:"prise_balle", label:"Prise de balle"},
@@ -328,6 +357,38 @@ const LEVELS = [
 ];
 const LEVEL_ORDER = ["fort","moyen","travail"]; // display order left->right in profile row (Fort left as most desirable? keep travail,moyen,fort reading order)
 const DISPLAY_ORDER = ["fort","moyen","travail"];
+
+const PRINCIPES_PAR_PHASE = {
+  "Conserver / Progresser": [
+    "Créer et utiliser des espaces",
+    "Jouer individuellement ou collectivement dans les intervalles et entre les lignes adverses",
+    "Jouer combiné, à 2 et à 3 (créer de la mobilité et de la vitesse) - avoir des solutions de passes - recréer des réseaux (triangles et jeu à l'intérieur)"
+  ],
+  "Déséquilibrer / Finir": [
+    "Rechercher le joueur lancé en profondeur dans le dos de la défense",
+    "Jouer en profondeur après un décalage",
+    "Jeu combiné pour créer le surnombre",
+    "Se démarquer pour fixer et éliminer (notion de 1x1) ou prendre de la vitesse",
+    "Fixer collectivement dans une zone pour jouer dans une autre",
+    "Se démarquer, éliminer, passer ou tirer face à une défense en place",
+    "Se démarquer, éliminer, passer ou tirer face à une défense en crise (conserver le temps d'avance)",
+    "S'ajuster, se réajuster pour finir"
+  ],
+  "S'opposer à la progression": [
+    "Protéger l'axe, le couloir de jeu direct (CDJ), organiser les prises en charge",
+    "Anticiper la profondeur (porteur non cadré)",
+    "Freiner la progression de l'adversaire, organiser et réorganiser les alignements"
+  ],
+  "Protéger son but": [
+    "S'organiser en déséquilibre",
+    "Densifier et être actif dans le CDJ",
+    "Organiser la pression collective sur « le temps de passe »",
+    "Couvrir le partenaire dans l'action défensive",
+    "Défendre son but, récupérer ou dégager le ballon",
+    "Anticiper, s'ajuster pour intervenir"
+  ]
+};
+const PHASES_JEU = Object.keys(PRINCIPES_PAR_PHASE);
 
 /* ---------- État ---------- */
 let state = {
@@ -559,14 +620,53 @@ function renderGroups(){
   });
 }
 
+/* ---------- Phase de jeu / Principe de jeu ---------- */
+function renderPhaseSelect(){
+  const sel = document.getElementById("seance-phase");
+  sel.innerHTML = '<option value="">—</option>' + PHASES_JEU.map(p => `<option value="${p}">${p}</option>`).join("");
+  sel.addEventListener("change", ()=> renderPrincipeSelect());
+}
+function renderPrincipeSelect(){
+  const phase = document.getElementById("seance-phase").value;
+  const sel = document.getElementById("seance-principe");
+  const options = phase ? PRINCIPES_PAR_PHASE[phase] : [];
+  sel.innerHTML = '<option value="">—</option>' + options.map(p => `<option value="${p}">${p}</option>`).join("");
+}
+renderPhaseSelect();
+renderPrincipeSelect();
+
 /* ---------- Sauvegarde de la semaine ---------- */
 document.getElementById("week-date").valueAsDate = new Date();
 
+async function suggestNextSeanceNum(){
+  let items = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
+  const api = getApiUrl();
+  if(api){
+    try{
+      const res = await fetch(api + "?action=getHistory");
+      const json = await res.json();
+      if(Array.isArray(json) && json.length) items = json;
+    }catch(err){ /* on garde l'historique local */ }
+  }
+  const nums = items.map(it => parseInt(it.numero, 10)).filter(n => !isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  document.getElementById("seance-num").value = next;
+}
+suggestNextSeanceNum();
+
 document.getElementById("btn-validate").addEventListener("click", async ()=>{
   const date = document.getElementById("week-date").value;
+  const numero = document.getElementById("seance-num").value;
+  const theme = document.getElementById("seance-theme").value.trim();
+  const phase = document.getElementById("seance-phase").value;
+  const principe = document.getElementById("seance-principe").value;
   const statusEl = document.getElementById("save-status");
   const payload = {
     date,
+    numero,
+    theme,
+    phase,
+    principe,
     criteres: [...state.selectedAttrs],
     mode: state.mode,
     groupes: state.groups.map(g=>({objectif:g.objectif, joueurs:g.players}))
@@ -580,6 +680,8 @@ document.getElementById("btn-validate").addEventListener("click", async ()=>{
   const api = getApiUrl();
   if(!api){
     statusEl.textContent = "Enregistré dans ce navigateur (aucune URL de Sheet configurée).";
+    suggestNextSeanceNum();
+    document.getElementById("seance-theme").value = "";
     return;
   }
   statusEl.textContent = "Enregistrement…";
@@ -590,6 +692,8 @@ document.getElementById("btn-validate").addEventListener("click", async ()=>{
       body: JSON.stringify({action:"saveWeek", data:payload})
     });
     statusEl.textContent = "Semaine enregistrée dans le Google Sheet ✓";
+    suggestNextSeanceNum();
+    document.getElementById("seance-theme").value = "";
   }catch(err){
     statusEl.textContent = "Sauvegardé localement seulement (échec de connexion au Sheet).";
   }
@@ -693,9 +797,11 @@ async function renderHistory(){
       : "aucun critère spécifique";
     div.innerHTML = `
       <div class="h-top">
-        <span class="h-date">${item.date || "date inconnue"}</span>
+        <span class="h-date">Entraînement n°${item.numero || "?"} — ${item.date || "date inconnue"}</span>
         <span class="h-meta">${item.mode === "mixte" ? "Mixte" : "Homogène"} · ${critLabel}</span>
       </div>
+      ${(item.phase || item.principe) ? `<div class="h-meta" style="margin-top:4px;">${item.phase || ""}${item.phase && item.principe ? " — " : ""}${item.principe || ""}</div>` : ""}
+      ${item.theme ? `<div class="h-meta" style="margin-top:2px;">Thème : ${item.theme}</div>` : ""}
       <div class="history-detail" id="hist-detail-${i}"></div>
     `;
     div.addEventListener("click", ()=>{
