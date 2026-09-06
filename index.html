@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Groupes d'Entraînement — U13</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --board:#122A1E;
+    --board-deep:#0C1F16;
+    --line:rgba(244,241,232,0.16);
+    --line-strong:rgba(244,241,232,0.32);
+    --chalk:#F4F1E8;
+    --chalk-dim:#C6D2C6;
+    --gold:#E8C468;
+    --blue-chalk:#89AAD6;
+    --red-chalk:#DE7A6E;
+    --panel:#17352600;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse at 50% -10%, #1B4530 0%, var(--board) 45%, var(--board-deep) 100%);
+    color:var(--chalk);
+    font-family:'Work Sans', sans-serif;
+    min-height:100vh;
+    padding-bottom:60px;
+  }
+  .pitch-lines{
+    position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.5;
+  }
+  .wrap{position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:28px 20px 40px;}
+
+  header{margin-bottom:22px;}
+  h1{
+    font-family:'Oswald', sans-serif;
+    font-weight:700;
+    font-size:clamp(28px,5vw,42px);
+    letter-spacing:0.5px;
+    margin:0 0 4px;
+    color:var(--chalk);
+  }
+  h1 span{color:var(--gold);}
+  .subtitle{color:var(--chalk-dim); font-size:15px; margin:0; max-width:60ch; line-height:1.5;}
+
+  nav.tabs{
+    display:flex; gap:2px; margin-top:22px; border-bottom:1px dashed var(--line-strong); flex-wrap:wrap;
+  }
+  nav.tabs button{
+    background:none; border:none; color:var(--chalk-dim);
+    font-family:'Oswald', sans-serif; font-size:15px; letter-spacing:0.3px;
+    padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent;
+    transition:color .15s, border-color .15s;
+  }
+  nav.tabs button.active{color:var(--gold); border-bottom-color:var(--gold);}
+  nav.tabs button:hover{color:var(--chalk);}
+
+  section.tab{display:none; padding-top:24px;}
+  section.tab.active{display:block;}
+
+  .board-panel{
+    border:1px dashed var(--line-strong);
+    border-radius:var(--radius);
+    padding:20px;
+    margin-bottom:20px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+  }
+  .board-panel h2{
+    font-family:'Oswald', sans-serif; font-weight:500; font-size:17px;
+    margin:0 0 14px; color:var(--chalk); letter-spacing:0.3px;
+  }
+
+  /* Profils */
+  .profile-grid-wrap{overflow-x:auto; padding-bottom:4px;}
+  .profile-row{
+    display:grid;
+    gap:8px; align-items:center; padding:8px 0;
+    border-bottom:1px solid rgba(244,241,232,0.06);
+    min-width:fit-content;
+  }
+  .profile-row:first-child{
+    border-bottom:1px dashed var(--line-strong); padding-bottom:10px; margin-bottom:2px;
+  }
+  .profile-row.header span{
+    font-size:11px; text-transform:uppercase; letter-spacing:0.8px; color:var(--chalk-dim); text-align:center;
+  }
+  .profile-name{font-size:14.5px; color:var(--chalk);}
+  .seg{
+    display:flex; border:1px solid var(--line-strong); border-radius:20px; overflow:hidden;
+  }
+  .seg button{
+    flex:1; background:none; border:none; color:var(--chalk-dim); font-size:12px;
+    padding:6px 4px; cursor:pointer; font-family:'Work Sans',sans-serif; transition:background .15s,color .15s;
+  }
+  .seg button + button{border-left:1px solid var(--line-strong);}
+  .seg button.lvl-fort.active{background:var(--gold); color:#12200f; font-weight:600;}
+  .seg button.lvl-moyen.active{background:var(--blue-chalk); color:#0d1a26; font-weight:600;}
+  .seg button.lvl-travail.active{background:var(--red-chalk); color:#2a0d09; font-weight:600;}
+
+  .btn{
+    font-family:'Oswald', sans-serif; letter-spacing:0.3px; font-size:14px;
+    background:none; border:1px solid var(--gold); color:var(--gold);
+    padding:9px 18px; border-radius:20px; cursor:pointer; transition:all .15s;
+  }
+  .btn:hover{background:var(--gold); color:#12200f;}
+  .btn.primary{background:var(--gold); color:#12200f;}
+  .btn.primary:hover{background:#f0d488;}
+  .btn.small{padding:5px 12px; font-size:12px;}
+  .actions-row{display:flex; gap:10px; justify-content:flex-end; margin-top:14px; flex-wrap:wrap;}
+  .status-msg{font-size:13px; color:var(--chalk-dim); margin-top:8px; min-height:16px;}
+
+  /* Chips */
+  .chip-row{display:flex; flex-wrap:wrap; gap:8px;}
+  .chip{
+    border:1px solid var(--line-strong); border-radius:20px; padding:7px 14px;
+    font-size:13.5px; color:var(--chalk-dim); cursor:pointer; user-select:none;
+    transition:background .15s, color .15s, border-color .15s;
+    background:rgba(255,255,255,0.02);
+  }
+  .chip.on{background:var(--gold); color:#12200f; border-color:var(--gold); font-weight:600;}
+  .chip.player{position:relative;}
+  .chip.player.off{opacity:0.35;}
+
+  .field-label{font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:var(--chalk-dim); margin-bottom:8px; display:block;}
+  .config-grid{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  @media(max-width:640px){.config-grid{grid-template-columns:1fr;}}
+
+  select, input[type=number], input[type=text], input[type=date]{
+    background:rgba(255,255,255,0.04); border:1px solid var(--line-strong); color:var(--chalk);
+    padding:8px 10px; border-radius:var(--radius); font-family:'Work Sans',sans-serif; font-size:14px;
+  }
+  input[type=text]::placeholder{color:var(--chalk-dim);}
+
+  .mode-toggle{display:flex; border:1px solid var(--line-strong); border-radius:20px; overflow:hidden; width:fit-content;}
+  .mode-toggle button{background:none;border:none;color:var(--chalk-dim);padding:8px 16px;font-size:13.5px;cursor:pointer;font-family:'Work Sans',sans-serif;}
+  .mode-toggle button.active{background:var(--gold); color:#12200f; font-weight:600;}
+  .mode-toggle button + button{border-left:1px solid var(--line-strong);}
+
+  /* Groups display */
+  .groups-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:16px; margin-top:18px;}
+  .group-zone{
+    border:1px dashed var(--line-strong); border-radius:8px; padding:14px; min-height:120px;
+    background:rgba(255,255,255,0.015); transition:border-color .15s, background .15s;
+  }
+  .group-zone.pick-target{border-color:var(--gold); background:rgba(232,196,104,0.06);}
+  .group-zone .gname{font-family:'Oswald',sans-serif; font-size:14px; color:var(--gold); margin-bottom:4px; letter-spacing:0.3px;}
+  .group-zone .gobjectif{
+    width:100%; background:none; border:none; border-bottom:1px dashed var(--line-strong);
+    color:var(--chalk-dim); font-size:12.5px; padding:2px 0 8px; margin-bottom:10px; font-family:'Work Sans',sans-serif;
+  }
+  .group-zone .gobjectif:focus{outline:none; border-bottom-color:var(--gold);}
+  .token-list{display:flex; flex-wrap:wrap; gap:8px;}
+  .token{
+    width:52px; display:flex; flex-direction:column; align-items:center; cursor:pointer; gap:4px;
+  }
+  .token .circle{
+    width:38px; height:38px; border-radius:50%; border:2px solid var(--line-strong);
+    display:flex; align-items:center; justify-content:center; font-family:'Oswald',sans-serif;
+    font-size:13px; font-weight:600; background:rgba(255,255,255,0.03); color:var(--chalk);
+    transition:border-color .15s, box-shadow .15s;
+  }
+  .token .lbl{font-size:9.5px; color:var(--chalk-dim); text-align:center; line-height:1.1; max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .token.picked .circle{border-color:var(--gold); box-shadow:0 0 0 3px rgba(232,196,104,0.25);}
+  .token .circle.lvl-3{border-color:var(--gold);}
+  .token .circle.lvl-2{border-color:var(--blue-chalk);}
+  .token .circle.lvl-1{border-color:var(--red-chalk);}
+
+  .legend{display:flex; gap:16px; font-size:12px; color:var(--chalk-dim); margin-top:6px; flex-wrap:wrap;}
+  .legend span{display:inline-flex; align-items:center; gap:5px;}
+  .legend i{width:10px; height:10px; border-radius:50%; display:inline-block;}
+
+  .empty-hint{color:var(--chalk-dim); font-size:13.5px; font-style:italic; padding:10px 0;}
+
+  /* History */
+  .history-item{border:1px solid var(--line); border-radius:6px; padding:14px 16px; margin-bottom:10px; cursor:pointer;}
+  .history-item .h-top{display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;}
+  .history-item .h-date{font-family:'Oswald',sans-serif; color:var(--gold); font-size:15px;}
+  .history-item .h-meta{font-size:12px; color:var(--chalk-dim);}
+  .history-detail{margin-top:12px; display:none;}
+  .history-detail.open{display:block;}
+
+  .settings-box{border-top:1px dashed var(--line-strong); margin-top:30px; padding-top:16px;}
+  .settings-box summary{cursor:pointer; color:var(--chalk-dim); font-size:13px;}
+  .settings-box .settings-body{margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+  .settings-box input[type=text]{flex:1; min-width:220px;}
+</style>
+</head>
+<body>
+
+<svg class="pitch-lines" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice">
+  <line x1="0" y1="500" x2="1000" y2="500" stroke="#F4F1E8" stroke-opacity="0.035" stroke-width="2"/>
+  <circle cx="500" cy="500" r="140" fill="none" stroke="#F4F1E8" stroke-opacity="0.035" stroke-width="2"/>
+  <circle cx="500" cy="500" r="4" fill="#F4F1E8" fill-opacity="0.05"/>
+</svg>
+
+<div class="wrap">
+  <header>
+    <h1>Groupes d'<span>Entraînement</span></h1>
+    <p class="subtitle">Compose les groupes de la séance selon ce qui compte vraiment ce jour-là — technique, vitesse, volume ou prise d'information — puis ajuste à la main avant de valider.</p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="creer">Créer les groupes</button>
+    <button class="tab-btn" data-tab="profils">Profils joueurs</button>
+    <button class="tab-btn" data-tab="historique">Historique</button>
+  </nav>
+
+  <!-- ONGLET CREER -->
+  <section class="tab active" id="tab-creer">
+
+    <div class="board-panel">
+      <h2>1 · Joueurs présents</h2>
+      <div class="chip-row" id="present-list"></div>
+      <div class="actions-row" style="margin-top:10px;">
+        <button class="btn small" id="btn-all-present">Tous présents</button>
+        <button class="btn small" id="btn-none-present">Aucun</button>
+      </div>
+    </div>
+
+    <div class="board-panel config-grid">
+      <div>
+        <h2>2 · Critère(s) de la séance</h2>
+        <span class="field-label">Quels attributs comptent aujourd'hui ?</span>
+        <div class="chip-row" id="attr-list"></div>
+      </div>
+      <div>
+        <h2>3 · Type de répartition</h2>
+        <span class="field-label">Comment regrouper les niveaux ?</span>
+        <div class="mode-toggle" id="mode-toggle">
+          <button data-mode="homogene" class="active">Homogène</button>
+          <button data-mode="mixte">Mixte</button>
+        </div>
+        <p class="status-msg" id="mode-explain">Les niveaux proches sont regroupés ensemble (ex. toros par niveau).</p>
+      </div>
+    </div>
+
+    <div class="board-panel">
+      <h2>4 · Nombre de groupes</h2>
+      <div class="chip-row" style="align-items:center;">
+        <select id="group-input-mode">
+          <option value="count">Nombre de groupes</option>
+          <option value="size">Taille par groupe</option>
+        </select>
+        <input type="number" id="group-input-value" min="2" max="11" value="3" style="width:70px;">
+        <button class="btn" id="btn-generate">Générer les groupes</button>
+      </div>
+    </div>
+
+    <div class="board-panel" id="groups-panel" style="display:none;">
+      <h2>5 · Groupes proposés — clique un joueur puis le groupe cible pour ajuster</h2>
+      <div class="legend">
+        <span><i style="background:var(--gold)"></i>Fort</span>
+        <span><i style="background:var(--blue-chalk)"></i>Moyen</span>
+        <span><i style="background:var(--red-chalk)"></i>À travailler</span>
+      </div>
+      <div class="groups-grid" id="groups-grid"></div>
+      <div class="actions-row">
+        <input type="date" id="week-date">
+        <button class="btn primary" id="btn-validate">Valider et enregistrer la semaine</button>
+      </div>
+      <p class="status-msg" id="save-status"></p>
+    </div>
+
+  </section>
+
+  <!-- ONGLET PROFILS -->
+  <section class="tab" id="tab-profils">
+    <div class="board-panel">
+      <h2>Profils des joueurs</h2>
+      <p class="subtitle" style="margin-bottom:16px;">Un niveau par attribut, indépendant de tout autre suivi. Modifiable à tout moment.</p>
+      <div class="profile-grid-wrap">
+        <div class="profile-row header" id="profiles-header"></div>
+        <div id="profiles-body"></div>
+      </div>
+      <div class="actions-row">
+        <button class="btn primary" id="btn-save-profiles">Enregistrer les profils</button>
+      </div>
+      <p class="status-msg" id="profiles-status"></p>
+    </div>
+  </section>
+
+  <!-- ONGLET HISTORIQUE -->
+  <section class="tab" id="tab-historique">
+    <div class="board-panel">
+      <h2>Semaines précédentes</h2>
+      <div id="history-list"><p class="empty-hint">Chargement…</p></div>
+    </div>
+  </section>
+
+  <details class="settings-box">
+    <summary>⚙️ Connexion au Google Sheet</summary>
+    <div class="settings-body">
+      <input type="text" id="api-url" placeholder="URL du Web App Apps Script (…/exec)">
+      <button class="btn small" id="btn-save-url">Enregistrer</button>
+      <button class="btn small" id="btn-test-url">Tester la connexion</button>
+    </div>
+    <p class="status-msg" id="api-status">URL déjà configurée par défaut. Change-la ici seulement si tu redéploies un nouveau Sheet.</p>
+  </details>
+
+</div>
+
+<script>
+/* ---------- Données de base ---------- */
+const PLAYERS = ["Hadi","Sebastien","Mickaël","Bakoutoubo","Sacha","Keys","Nourou","Yanis","Mathis","Ethan",
+  "Abdoul Karim","Jalil","Gabin","Adam","Kalifa","Bilel","Pablo","Melih","Issam","Emir","Loan","Sarah"];
+
+const ATTRS = [
+  {key:"prise_balle", label:"Prise de balle"},
+  {key:"passe", label:"Passe"},
+  {key:"frappe", label:"Frappe"},
+  {key:"choix_technique", label:"Choix technique"},
+  {key:"vitesse", label:"Vitesse"},
+  {key:"volume", label:"Volume / endurance"},
+  {key:"info", label:"Prise d'info"}
+];
+function attrGridColumns(){
+  return "120px repeat(" + ATTRS.length + ", minmax(100px,1fr))";
+}
+const LEVELS = [
+  {key:"travail", label:"À travailler", val:1},
+  {key:"moyen", label:"Moyen", val:2},
+  {key:"fort", label:"Fort", val:3}
+];
+const LEVEL_ORDER = ["fort","moyen","travail"]; // display order left->right in profile row (Fort left as most desirable? keep travail,moyen,fort reading order)
+const DISPLAY_ORDER = ["fort","moyen","travail"];
+
+/* ---------- État ---------- */
+let state = {
+  profiles: {},          // { name: {technique:'moyen', vitesse:'moyen', ...} }
+  presentSet: new Set(PLAYERS),
+  selectedAttrs: new Set(),
+  mode: "homogene",
+  groups: null,           // [{objectif:'', players:[names]}]
+  picked: null            // joueur sélectionné pour déplacement manuel
+};
+
+const LS_PROFILES = "groupes_entrainement_profiles_v1";
+const LS_HISTORY = "groupes_entrainement_history_v1";
+const LS_API = "groupes_entrainement_api_url_v1";
+const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbxVxWGmzB6z3FPuU7TBNAA3vkpPTyVEqZblbRzH23g2PmtjbJBuASUp12g4_HXiEHcfyg/exec";
+
+function loadLocalProfiles(){
+  const raw = localStorage.getItem(LS_PROFILES);
+  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
+  const def = {};
+  PLAYERS.forEach(p => {
+    const profile = {};
+    ATTRS.forEach(a => profile[a.key] = "moyen");
+    def[p] = profile;
+  });
+  return def;
+}
+function saveLocalProfiles(){ localStorage.setItem(LS_PROFILES, JSON.stringify(state.profiles)); }
+
+function getApiUrl(){ return localStorage.getItem(LS_API) || DEFAULT_API_URL; }
+
+/* ---------- Init ---------- */
+state.profiles = loadLocalProfiles();
+
+/* ---------- Onglets ---------- */
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll("section.tab").forEach(s=>s.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-"+btn.dataset.tab).classList.add("active");
+    if(btn.dataset.tab === "historique") renderHistory();
+  });
+});
+
+/* ---------- Onglet Créer : joueurs présents ---------- */
+function renderPresentList(){
+  const el = document.getElementById("present-list");
+  el.innerHTML = "";
+  PLAYERS.forEach(name=>{
+    const chip = document.createElement("div");
+    chip.className = "chip player" + (state.presentSet.has(name) ? "" : " off");
+    chip.textContent = name;
+    chip.addEventListener("click", ()=>{
+      if(state.presentSet.has(name)) state.presentSet.delete(name);
+      else state.presentSet.add(name);
+      renderPresentList();
+    });
+    el.appendChild(chip);
+  });
+}
+document.getElementById("btn-all-present").addEventListener("click", ()=>{ state.presentSet = new Set(PLAYERS); renderPresentList(); });
+document.getElementById("btn-none-present").addEventListener("click", ()=>{ state.presentSet = new Set(); renderPresentList(); });
+
+/* ---------- Onglet Créer : critères ---------- */
+function renderAttrList(){
+  const el = document.getElementById("attr-list");
+  el.innerHTML = "";
+  ATTRS.forEach(a=>{
+    const chip = document.createElement("div");
+    chip.className = "chip" + (state.selectedAttrs.has(a.key) ? " on" : "");
+    chip.textContent = a.label;
+    chip.addEventListener("click", ()=>{
+      if(state.selectedAttrs.has(a.key)) state.selectedAttrs.delete(a.key);
+      else state.selectedAttrs.add(a.key);
+      renderAttrList();
+    });
+    el.appendChild(chip);
+  });
+}
+
+/* ---------- Mode toggle ---------- */
+document.querySelectorAll("#mode-toggle button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll("#mode-toggle button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    state.mode = btn.dataset.mode;
+    document.getElementById("mode-explain").textContent = state.mode === "homogene"
+      ? "Les niveaux proches sont regroupés ensemble (ex. toros par niveau)."
+      : "Chaque groupe reçoit un mélange de niveaux équilibré (ex. jeux collectifs mixtes).";
+  });
+});
+
+/* ---------- Génération des groupes ---------- */
+function levelVal(name, attrKey){
+  const p = state.profiles[name] || {};
+  const lvlKey = p[attrKey] || "moyen";
+  const lvl = LEVELS.find(l=>l.key===lvlKey);
+  return lvl ? lvl.val : 2;
+}
+function scoreFor(name){
+  const attrs = [...state.selectedAttrs];
+  if(attrs.length === 0) return 2;
+  const sum = attrs.reduce((s,a)=> s + levelVal(name,a), 0);
+  return sum / attrs.length;
+}
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+document.getElementById("btn-generate").addEventListener("click", ()=>{
+  const present = shuffle([...state.presentSet]);
+  if(present.length < 2){
+    alert("Sélectionne au moins 2 joueurs présents.");
+    return;
+  }
+  const ranked = present
+    .map(name => ({name, score: scoreFor(name)}))
+    .sort((a,b)=> b.score - a.score);
+
+  const inputMode = document.getElementById("group-input-mode").value;
+  const inputValue = parseInt(document.getElementById("group-input-value").value, 10) || 3;
+  let nGroups;
+  if(inputMode === "count") nGroups = Math.max(2, Math.min(inputValue, ranked.length));
+  else nGroups = Math.max(2, Math.ceil(ranked.length / Math.max(1,inputValue)));
+
+  const groups = Array.from({length:nGroups}, ()=>({objectif:"", players:[]}));
+
+  if(state.mode === "homogene"){
+    // découpage en tranches contiguës de niveau
+    const base = Math.floor(ranked.length / nGroups);
+    let rest = ranked.length % nGroups;
+    let idx = 0;
+    for(let g=0; g<nGroups; g++){
+      const size = base + (rest > 0 ? 1 : 0);
+      if(rest>0) rest--;
+      for(let k=0;k<size;k++){
+        groups[g].players.push(ranked[idx].name);
+        idx++;
+      }
+    }
+  } else {
+    // snake draft pour équilibrer le niveau moyen de chaque groupe
+    let g = 0, dir = 1;
+    ranked.forEach(r=>{
+      groups[g].players.push(r.name);
+      g += dir;
+      if(g === nGroups){ g = nGroups-1; dir = -1; }
+      else if(g < 0){ g = 0; dir = 1; }
+    });
+  }
+
+  state.groups = groups;
+  state.picked = null;
+  renderGroups();
+  document.getElementById("groups-panel").style.display = "block";
+  document.getElementById("groups-panel").scrollIntoView({behavior:"smooth", block:"start"});
+});
+
+function dominantLevelClass(name){
+  const attrs = [...state.selectedAttrs];
+  const s = attrs.length ? scoreFor(name) : 2;
+  if(s >= 2.34) return "lvl-3";
+  if(s >= 1.67) return "lvl-2";
+  return "lvl-1";
+}
+function initials(name){
+  const parts = name.split(" ");
+  if(parts.length === 1) return parts[0].slice(0,3);
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+function renderGroups(){
+  const grid = document.getElementById("groups-grid");
+  grid.innerHTML = "";
+  state.groups.forEach((grp, gi)=>{
+    const zone = document.createElement("div");
+    zone.className = "group-zone";
+    zone.dataset.index = gi;
+
+    const title = document.createElement("div");
+    title.className = "gname";
+    title.textContent = "Groupe " + (gi+1) + " · " + grp.players.length + " joueurs";
+    zone.appendChild(title);
+
+    const objInput = document.createElement("input");
+    objInput.type = "text";
+    objInput.className = "gobjectif";
+    objInput.placeholder = "Objectif du groupe (optionnel)";
+    objInput.value = grp.objectif;
+    objInput.addEventListener("input", (e)=>{ grp.objectif = e.target.value; });
+    zone.appendChild(objInput);
+
+    const list = document.createElement("div");
+    list.className = "token-list";
+    grp.players.forEach(name=>{
+      const tok = document.createElement("div");
+      tok.className = "token" + (state.picked === name ? " picked" : "");
+      tok.innerHTML = `<div class="circle ${dominantLevelClass(name)}">${initials(name)}</div><div class="lbl">${name.split(" ")[0]}</div>`;
+      tok.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        if(state.picked === name){ state.picked = null; }
+        else { state.picked = name; }
+        renderGroups();
+      });
+      list.appendChild(tok);
+    });
+    zone.appendChild(list);
+
+    zone.addEventListener("click", ()=>{
+      if(!state.picked) return;
+      // retirer le joueur pické de son groupe actuel puis l'ajouter ici
+      state.groups.forEach(g=>{
+        const idx = g.players.indexOf(state.picked);
+        if(idx > -1) g.players.splice(idx,1);
+      });
+      grp.players.push(state.picked);
+      state.picked = null;
+      renderGroups();
+    });
+
+    if(state.picked) zone.classList.add("pick-target");
+    grid.appendChild(zone);
+  });
+}
+
+/* ---------- Sauvegarde de la semaine ---------- */
+document.getElementById("week-date").valueAsDate = new Date();
+
+document.getElementById("btn-validate").addEventListener("click", async ()=>{
+  const date = document.getElementById("week-date").value;
+  const statusEl = document.getElementById("save-status");
+  const payload = {
+    date,
+    criteres: [...state.selectedAttrs],
+    mode: state.mode,
+    groupes: state.groups.map(g=>({objectif:g.objectif, joueurs:g.players}))
+  };
+
+  // sauvegarde locale systématique
+  const hist = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
+  hist.unshift(payload);
+  localStorage.setItem(LS_HISTORY, JSON.stringify(hist));
+
+  const api = getApiUrl();
+  if(!api){
+    statusEl.textContent = "Enregistré dans ce navigateur (aucune URL de Sheet configurée).";
+    return;
+  }
+  statusEl.textContent = "Enregistrement…";
+  try{
+    await fetch(api, {
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({action:"saveWeek", data:payload})
+    });
+    statusEl.textContent = "Semaine enregistrée dans le Google Sheet ✓";
+  }catch(err){
+    statusEl.textContent = "Sauvegardé localement seulement (échec de connexion au Sheet).";
+  }
+});
+
+/* ---------- Onglet Profils ---------- */
+function renderProfilesHeader(){
+  const header = document.getElementById("profiles-header");
+  header.style.gridTemplateColumns = attrGridColumns();
+  header.innerHTML = "";
+  const nameLbl = document.createElement("span");
+  nameLbl.style.textAlign = "left";
+  nameLbl.textContent = "Joueur";
+  header.appendChild(nameLbl);
+  ATTRS.forEach(a=>{
+    const span = document.createElement("span");
+    span.textContent = a.label;
+    header.appendChild(span);
+  });
+}
+
+function renderProfiles(){
+  renderProfilesHeader();
+  const body = document.getElementById("profiles-body");
+  body.innerHTML = "";
+  PLAYERS.forEach(name=>{
+    const row = document.createElement("div");
+    row.className = "profile-row";
+    row.style.gridTemplateColumns = attrGridColumns();
+    const nameEl = document.createElement("div");
+    nameEl.className = "profile-name";
+    nameEl.textContent = name;
+    row.appendChild(nameEl);
+
+    ATTRS.forEach(a=>{
+      const seg = document.createElement("div");
+      seg.className = "seg";
+      DISPLAY_ORDER.forEach(lvlKey=>{
+        const lvl = LEVELS.find(l=>l.key===lvlKey);
+        const b = document.createElement("button");
+        b.textContent = lvl.label;
+        b.className = "lvl-" + lvlKey + (state.profiles[name][a.key] === lvlKey ? " active" : "");
+        b.addEventListener("click", ()=>{
+          state.profiles[name][a.key] = lvlKey;
+          renderProfiles();
+        });
+        seg.appendChild(b);
+      });
+      row.appendChild(seg);
+    });
+    body.appendChild(row);
+  });
+}
+
+document.getElementById("btn-save-profiles").addEventListener("click", async ()=>{
+  saveLocalProfiles();
+  const statusEl = document.getElementById("profiles-status");
+  const api = getApiUrl();
+  if(!api){
+    statusEl.textContent = "Profils enregistrés dans ce navigateur.";
+    return;
+  }
+  statusEl.textContent = "Enregistrement…";
+  try{
+    await fetch(api, {
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({action:"saveProfiles", data: state.profiles})
+    });
+    statusEl.textContent = "Profils enregistrés dans le Google Sheet ✓";
+  }catch(err){
+    statusEl.textContent = "Sauvegardés localement seulement (échec de connexion au Sheet).";
+  }
+});
+
+/* ---------- Onglet Historique ---------- */
+async function renderHistory(){
+  const el = document.getElementById("history-list");
+  el.innerHTML = "<p class='empty-hint'>Chargement…</p>";
+  let items = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
+
+  const api = getApiUrl();
+  if(api){
+    try{
+      const res = await fetch(api + "?action=getHistory");
+      const json = await res.json();
+      if(Array.isArray(json) && json.length) items = json;
+    }catch(err){ /* on garde l'historique local */ }
+  }
+
+  if(!items.length){
+    el.innerHTML = "<p class='empty-hint'>Aucune semaine enregistrée pour l'instant.</p>";
+    return;
+  }
+  el.innerHTML = "";
+  items.forEach((item, i)=>{
+    const div = document.createElement("div");
+    div.className = "history-item";
+    const critLabel = (item.criteres && item.criteres.length)
+      ? item.criteres.map(c => (ATTRS.find(a=>a.key===c)||{}).label || c).join(", ")
+      : "aucun critère spécifique";
+    div.innerHTML = `
+      <div class="h-top">
+        <span class="h-date">${item.date || "date inconnue"}</span>
+        <span class="h-meta">${item.mode === "mixte" ? "Mixte" : "Homogène"} · ${critLabel}</span>
+      </div>
+      <div class="history-detail" id="hist-detail-${i}"></div>
+    `;
+    div.addEventListener("click", ()=>{
+      const detail = div.querySelector(".history-detail");
+      detail.classList.toggle("open");
+      if(detail.classList.contains("open") && !detail.dataset.filled){
+        detail.dataset.filled = "1";
+        detail.innerHTML = (item.groupes || []).map((g,gi)=>`
+          <div style="margin-bottom:8px;">
+            <strong style="color:var(--gold); font-family:'Oswald',sans-serif; font-size:13px;">Groupe ${gi+1}${g.objectif ? " — " + g.objectif : ""}</strong>
+            <div style="color:var(--chalk-dim); font-size:13px;">${(g.joueurs||[]).join(", ")}</div>
+          </div>`).join("");
+      }
+    });
+    el.appendChild(div);
+  });
+}
+
+/* ---------- Paramètres API ---------- */
+document.getElementById("api-url").value = getApiUrl();
+document.getElementById("btn-save-url").addEventListener("click", ()=>{
+  localStorage.setItem(LS_API, document.getElementById("api-url").value.trim());
+  document.getElementById("api-status").textContent = "URL enregistrée.";
+});
+document.getElementById("btn-test-url").addEventListener("click", async ()=>{
+  const api = getApiUrl();
+  const statusEl = document.getElementById("api-status");
+  if(!api){ statusEl.textContent = "Aucune URL enregistrée."; return; }
+  statusEl.textContent = "Test en cours…";
+  try{
+    const res = await fetch(api + "?action=ping");
+    const txt = await res.text();
+    statusEl.textContent = "Connexion OK : " + txt.slice(0,80);
+  }catch(err){
+    statusEl.textContent = "Échec de connexion — vérifie que le script est bien déployé en accès public.";
+  }
+});
+
+/* ---------- Démarrage ---------- */
+renderPresentList();
+renderAttrList();
+renderProfiles();
+
+async function loadProfilesFromApi(){
+  const api = getApiUrl();
+  if(!api) return;
+  try{
+    const res = await fetch(api + "?action=getProfiles");
+    const json = await res.json();
+    if(json && typeof json === "object" && Object.keys(json).length){
+      PLAYERS.forEach(name=>{
+        if(json[name]) state.profiles[name] = json[name];
+      });
+      saveLocalProfiles();
+      renderProfiles();
+    }
+  }catch(err){ /* on garde les profils locaux */ }
+}
+loadProfilesFromApi();
+</script>
+</body>
+</html>
