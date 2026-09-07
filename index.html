@@ -137,6 +137,7 @@
     background:rgba(255,255,255,0.04); border:1px solid var(--line-strong); color:var(--chalk);
     padding:8px 10px; border-radius:var(--radius); font-family:'Work Sans',sans-serif; font-size:14px;
   }
+  select:disabled{opacity:0.35; cursor:not-allowed;}
   input[type=text]::placeholder{color:var(--chalk-dim);}
 
   .mode-toggle{display:flex; border:1px solid var(--line-strong); border-radius:20px; overflow:hidden; width:fit-content;}
@@ -299,7 +300,7 @@
         <span class="field-label">Résultat souhaité</span>
         <div class="mode-toggle" id="opposition-output-toggle">
           <button data-output="equipes" class="active">Équipes complètes (Camp A vs Camp B)</button>
-          <button data-output="duos">Duos appariés par niveau</button>
+          <button data-output="duos">Duos appariés par secteur / niveau</button>
         </div>
       </div>
       <div class="actions-row">
@@ -375,7 +376,7 @@ const ATTRS = [
   {key:"info", label:"Prise d'info"}
 ];
 function attrGridColumns(){
-  return "120px 130px 130px repeat(" + ATTRS.length + ", minmax(100px,1fr))";
+  return "120px 120px 100px 120px 100px repeat(" + ATTRS.length + ", minmax(100px,1fr))";
 }
 const LEVELS = [
   {key:"travail", label:"À travailler", val:1},
@@ -442,7 +443,9 @@ function loadLocalProfiles(){
       PLAYERS.forEach(p=>{
         if(!parsed[p]) parsed[p] = {};
         if(parsed[p].poste_principal === undefined) parsed[p].poste_principal = "Milieu";
+        if(parsed[p].secteur_principal === undefined) parsed[p].secteur_principal = "";
         if(parsed[p].poste_secondaire === undefined) parsed[p].poste_secondaire = "";
+        if(parsed[p].secteur_secondaire === undefined) parsed[p].secteur_secondaire = "";
         ATTRS.forEach(a=>{ if(parsed[p][a.key] === undefined) parsed[p][a.key] = "moyen"; });
       });
       return parsed;
@@ -450,7 +453,7 @@ function loadLocalProfiles(){
   }
   const def = {};
   PLAYERS.forEach(p => {
-    const profile = {poste_principal:"Milieu", poste_secondaire:""};
+    const profile = {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
     ATTRS.forEach(a => profile[a.key] = "moyen");
     def[p] = profile;
   });
@@ -563,6 +566,51 @@ function matchesPostes(name, posteSet){
   return posteSet.has(p.poste_principal) || (p.poste_secondaire && posteSet.has(p.poste_secondaire));
 }
 
+function playerSecteurForCamp(name, posteSet){
+  const p = state.profiles[name];
+  if(!p) return "";
+  if(posteSet.has(p.poste_principal)) return p.secteur_principal || "";
+  if(p.poste_secondaire && posteSet.has(p.poste_secondaire)) return p.secteur_secondaire || "";
+  return "";
+}
+
+function buildDuos(rankedA, rankedB){
+  // Regroupe d'abord par secteur (Axe/Excentré) pour faire s'affronter les
+  // joueurs sur des postes-miroirs (ex: défenseur axial vs attaquant, défenseur
+  // excentré vs milieu excentré), puis complète par niveau pour le reste.
+  function bucketize(ranked, campSet){
+    const b = {"Axe":[], "Excentré":[], "":[]};
+    ranked.forEach(r=>{
+      const sect = playerSecteurForCamp(r.name, campSet);
+      (b[sect] || b[""]).push(r);
+    });
+    return b;
+  }
+  const bucketsA = bucketize(rankedA, state.campA);
+  const bucketsB = bucketize(rankedB, state.campB);
+
+  const pairs = [];
+  let leftoverA = [];
+  let leftoverB = [];
+
+  ["Axe","Excentré"].forEach(sect=>{
+    const listA = bucketsA[sect];
+    const listB = bucketsB[sect];
+    const n = Math.min(listA.length, listB.length);
+    for(let i=0;i<n;i++) pairs.push([listA[i], listB[i]]);
+    leftoverA = leftoverA.concat(listA.slice(n));
+    leftoverB = leftoverB.concat(listB.slice(n));
+  });
+  // joueurs sans secteur précisé : appariement de repli par niveau
+  leftoverA = leftoverA.concat(bucketsA[""]).sort((a,b)=>b.score-a.score);
+  leftoverB = leftoverB.concat(bucketsB[""]).sort((a,b)=>b.score-a.score);
+  const n2 = Math.min(leftoverA.length, leftoverB.length);
+  for(let i=0;i<n2;i++) pairs.push([leftoverA[i], leftoverB[i]]);
+  const singles = leftoverA.slice(n2).concat(leftoverB.slice(n2));
+
+  return {pairs, singles};
+}
+
 document.getElementById("btn-generate-opposition").addEventListener("click", ()=>{
   const present = [...state.presentSet];
   if(state.campA.size === 0 || state.campB.size === 0){
@@ -587,12 +635,11 @@ document.getElementById("btn-generate-opposition").addEventListener("click", ()=
     groups.push({objectif:"Camp A — " + [...state.campA].join(" / "), players: rankedA.map(r=>r.name)});
     groups.push({objectif:"Camp B — " + [...state.campB].join(" / "), players: rankedB.map(r=>r.name)});
   } else {
-    const n = Math.min(rankedA.length, rankedB.length);
-    for(let i=0;i<n;i++){
-      groups.push({objectif:"", players:[rankedA[i].name, rankedB[i].name]});
-    }
-    const leftovers = rankedA.slice(n).concat(rankedB.slice(n));
-    leftovers.forEach(r=>{
+    const {pairs, singles} = buildDuos(rankedA, rankedB);
+    pairs.forEach(([a,b])=>{
+      groups.push({objectif:"", players:[a.name, b.name]});
+    });
+    singles.forEach(r=>{
       groups.push({objectif:"En attente d'un binôme", players:[r.name]});
     });
   }
@@ -904,7 +951,7 @@ function renderProfilesHeader(){
   nameLbl.style.textAlign = "left";
   nameLbl.textContent = "Joueur";
   header.appendChild(nameLbl);
-  ["Poste principal","Poste secondaire"].forEach(lbl=>{
+  ["Poste principal","Secteur","Poste secondaire","Secteur"].forEach(lbl=>{
     const span = document.createElement("span");
     span.textContent = lbl;
     header.appendChild(span);
@@ -936,8 +983,34 @@ function renderProfiles(){
       if(state.profiles[name].poste_principal === pt) opt.selected = true;
       principalSel.appendChild(opt);
     });
-    principalSel.addEventListener("change", ()=>{ state.profiles[name].poste_principal = principalSel.value; });
     row.appendChild(principalSel);
+
+    const secteurPrincipalSel = document.createElement("select");
+    row.appendChild(secteurPrincipalSel);
+    function fillSecteur(sel, value){
+      sel.innerHTML = "";
+      const noneOpt = document.createElement("option");
+      noneOpt.value = ""; noneOpt.textContent = "—";
+      sel.appendChild(noneOpt);
+      ["Axe","Excentré"].forEach(s=>{
+        const opt = document.createElement("option");
+        opt.value = s; opt.textContent = s;
+        if(value === s) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+    function refreshSecteurPrincipal(){
+      const isGardien = principalSel.value === "Gardien";
+      secteurPrincipalSel.disabled = isGardien;
+      if(isGardien){ state.profiles[name].secteur_principal = ""; }
+      fillSecteur(secteurPrincipalSel, state.profiles[name].secteur_principal);
+    }
+    principalSel.addEventListener("change", ()=>{
+      state.profiles[name].poste_principal = principalSel.value;
+      refreshSecteurPrincipal();
+    });
+    secteurPrincipalSel.addEventListener("change", ()=>{ state.profiles[name].secteur_principal = secteurPrincipalSel.value; });
+    refreshSecteurPrincipal();
 
     const secondaireSel = document.createElement("select");
     const noneOpt = document.createElement("option");
@@ -950,8 +1023,22 @@ function renderProfiles(){
       if(state.profiles[name].poste_secondaire === pt) opt.selected = true;
       secondaireSel.appendChild(opt);
     });
-    secondaireSel.addEventListener("change", ()=>{ state.profiles[name].poste_secondaire = secondaireSel.value; });
     row.appendChild(secondaireSel);
+
+    const secteurSecondaireSel = document.createElement("select");
+    row.appendChild(secteurSecondaireSel);
+    function refreshSecteurSecondaire(){
+      const disabled = !state.profiles[name].poste_secondaire || state.profiles[name].poste_secondaire === "Gardien";
+      secteurSecondaireSel.disabled = disabled;
+      if(disabled){ state.profiles[name].secteur_secondaire = ""; }
+      fillSecteur(secteurSecondaireSel, state.profiles[name].secteur_secondaire);
+    }
+    secondaireSel.addEventListener("change", ()=>{
+      state.profiles[name].poste_secondaire = secondaireSel.value;
+      refreshSecteurSecondaire();
+    });
+    secteurSecondaireSel.addEventListener("change", ()=>{ state.profiles[name].secteur_secondaire = secteurSecondaireSel.value; });
+    refreshSecteurSecondaire();
 
     ATTRS.forEach(a=>{
       const seg = document.createElement("div");
