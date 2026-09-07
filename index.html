@@ -1081,6 +1081,13 @@ document.getElementById("btn-save-profiles").addEventListener("click", async ()=
   }
 });
 
+function formatDateFr(iso){
+  if(!iso || typeof iso !== "string") return "date inconnue";
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return iso;
+  return m[3] + "/" + m[2] + "/" + m[1];
+}
+
 /* ---------- Onglet Historique ---------- */
 async function renderHistory(){
   const el = document.getElementById("history-list");
@@ -1109,7 +1116,7 @@ async function renderHistory(){
       : "aucun critère spécifique";
     div.innerHTML = `
       <div class="h-top">
-        <span class="h-date">Entraînement n°${item.numero || "?"} — ${item.date || "date inconnue"}</span>
+        <span class="h-date">Entraînement n°${item.numero || "?"} — ${formatDateFr(item.date)}</span>
         <span class="h-meta">${modeLabel(item.mode)} · ${critLabel}</span>
       </div>
       ${(item.phase || item.principe) ? `<div class="h-meta" style="margin-top:4px;">${item.phase || ""}${item.phase && item.principe ? " — " : ""}${item.principe || ""}</div>` : ""}
