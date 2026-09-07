@@ -264,12 +264,13 @@
         <div class="mode-toggle" id="mode-toggle">
           <button data-mode="homogene" class="active">Homogène</button>
           <button data-mode="mixte">Mixte</button>
+          <button data-mode="opposition">Opposition par poste</button>
         </div>
         <p class="status-msg" id="mode-explain">Les niveaux proches sont regroupés ensemble (ex. toros par niveau).</p>
       </div>
     </div>
 
-    <div class="board-panel">
+    <div class="board-panel" id="panel-count">
       <h2>4 · Nombre de groupes</h2>
       <div class="chip-row" style="align-items:center;">
         <select id="group-input-mode">
@@ -278,6 +279,30 @@
         </select>
         <input type="number" id="group-input-value" min="2" max="11" value="3" style="width:70px;">
         <button class="btn" id="btn-generate">Générer les groupes</button>
+      </div>
+    </div>
+
+    <div class="board-panel" id="panel-opposition" style="display:none;">
+      <h2>4 · Composition des camps</h2>
+      <div class="config-grid">
+        <div>
+          <span class="field-label">Camp A — poste(s)</span>
+          <div class="chip-row" id="campA-postes"></div>
+        </div>
+        <div>
+          <span class="field-label">Camp B — poste(s)</span>
+          <div class="chip-row" id="campB-postes"></div>
+        </div>
+      </div>
+      <div style="margin-top:16px;">
+        <span class="field-label">Résultat souhaité</span>
+        <div class="mode-toggle" id="opposition-output-toggle">
+          <button data-output="equipes" class="active">Équipes complètes (Camp A vs Camp B)</button>
+          <button data-output="duos">Duos appariés par niveau</button>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="btn" id="btn-generate-opposition">Générer l'opposition</button>
       </div>
     </div>
 
@@ -348,13 +373,14 @@ const ATTRS = [
   {key:"info", label:"Prise d'info"}
 ];
 function attrGridColumns(){
-  return "120px repeat(" + ATTRS.length + ", minmax(100px,1fr))";
+  return "120px 130px 130px repeat(" + ATTRS.length + ", minmax(100px,1fr))";
 }
 const LEVELS = [
   {key:"travail", label:"À travailler", val:1},
   {key:"moyen", label:"Moyen", val:2},
   {key:"fort", label:"Fort", val:3}
 ];
+const POSTES = ["Gardien","Défenseur","Milieu","Attaquant"];
 const LEVEL_ORDER = ["fort","moyen","travail"]; // display order left->right in profile row (Fort left as most desirable? keep travail,moyen,fort reading order)
 const DISPLAY_ORDER = ["fort","moyen","travail"];
 
@@ -407,10 +433,22 @@ const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbxVxWGmzB6z3FPu
 
 function loadLocalProfiles(){
   const raw = localStorage.getItem(LS_PROFILES);
-  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
+  if(raw){
+    try{
+      const parsed = JSON.parse(raw);
+      // migration : s'assurer que chaque joueur a bien les champs de poste
+      PLAYERS.forEach(p=>{
+        if(!parsed[p]) parsed[p] = {};
+        if(parsed[p].poste_principal === undefined) parsed[p].poste_principal = "Milieu";
+        if(parsed[p].poste_secondaire === undefined) parsed[p].poste_secondaire = "";
+        ATTRS.forEach(a=>{ if(parsed[p][a.key] === undefined) parsed[p][a.key] = "moyen"; });
+      });
+      return parsed;
+    }catch(e){}
+  }
   const def = {};
   PLAYERS.forEach(p => {
-    const profile = {};
+    const profile = {poste_principal:"Milieu", poste_secondaire:""};
     ATTRS.forEach(a => profile[a.key] = "moyen");
     def[p] = profile;
   });
@@ -476,10 +514,95 @@ document.querySelectorAll("#mode-toggle button").forEach(btn=>{
     document.querySelectorAll("#mode-toggle button").forEach(b=>b.classList.remove("active"));
     btn.classList.add("active");
     state.mode = btn.dataset.mode;
-    document.getElementById("mode-explain").textContent = state.mode === "homogene"
-      ? "Les niveaux proches sont regroupés ensemble (ex. toros par niveau)."
-      : "Chaque groupe reçoit un mélange de niveaux équilibré (ex. jeux collectifs mixtes).";
+    const explain = document.getElementById("mode-explain");
+    if(state.mode === "homogene") explain.textContent = "Les niveaux proches sont regroupés ensemble (ex. toros par niveau).";
+    else if(state.mode === "mixte") explain.textContent = "Chaque groupe reçoit un mélange de niveaux équilibré (ex. jeux collectifs mixtes).";
+    else explain.textContent = "Deux camps définis par poste s'affrontent, appariés par niveau (ex. défenseurs forts vs attaquants forts).";
+    document.getElementById("panel-count").style.display = (state.mode === "opposition") ? "none" : "block";
+    document.getElementById("panel-opposition").style.display = (state.mode === "opposition") ? "block" : "none";
   });
+});
+
+/* ---------- Camps (mode opposition) ---------- */
+state.campA = new Set();
+state.campB = new Set();
+state.oppositionOutput = "equipes";
+
+function renderCampChips(){
+  ["A","B"].forEach(camp=>{
+    const el = document.getElementById("camp"+camp+"-postes");
+    el.innerHTML = "";
+    const set = camp === "A" ? state.campA : state.campB;
+    POSTES.forEach(pt=>{
+      const chip = document.createElement("div");
+      chip.className = "chip" + (set.has(pt) ? " on" : "");
+      chip.textContent = pt;
+      chip.addEventListener("click", ()=>{
+        if(set.has(pt)) set.delete(pt); else set.add(pt);
+        renderCampChips();
+      });
+      el.appendChild(chip);
+    });
+  });
+}
+renderCampChips();
+
+document.querySelectorAll("#opposition-output-toggle button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll("#opposition-output-toggle button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    state.oppositionOutput = btn.dataset.output;
+  });
+});
+
+function matchesPostes(name, posteSet){
+  const p = state.profiles[name];
+  if(!p) return false;
+  return posteSet.has(p.poste_principal) || (p.poste_secondaire && posteSet.has(p.poste_secondaire));
+}
+
+document.getElementById("btn-generate-opposition").addEventListener("click", ()=>{
+  const present = [...state.presentSet];
+  if(state.campA.size === 0 || state.campB.size === 0){
+    alert("Choisis au moins un poste pour chaque camp.");
+    return;
+  }
+  const campAPlayers = present.filter(n => matchesPostes(n, state.campA));
+  const campBPlayers = present.filter(n => matchesPostes(n, state.campB) && campAPlayers.indexOf(n) === -1);
+  const assigned = new Set([...campAPlayers, ...campBPlayers]);
+  const horsCamp = present.filter(n => !assigned.has(n));
+
+  const rankedA = campAPlayers.map(name=>({name, score:scoreFor(name)})).sort((a,b)=>b.score-a.score);
+  const rankedB = campBPlayers.map(name=>({name, score:scoreFor(name)})).sort((a,b)=>b.score-a.score);
+
+  if(rankedA.length === 0 || rankedB.length === 0){
+    alert("Aucun joueur présent ne correspond à l'un des deux camps.");
+    return;
+  }
+
+  let groups = [];
+  if(state.oppositionOutput === "equipes"){
+    groups.push({objectif:"Camp A — " + [...state.campA].join(" / "), players: rankedA.map(r=>r.name)});
+    groups.push({objectif:"Camp B — " + [...state.campB].join(" / "), players: rankedB.map(r=>r.name)});
+  } else {
+    const n = Math.min(rankedA.length, rankedB.length);
+    for(let i=0;i<n;i++){
+      groups.push({objectif:"", players:[rankedA[i].name, rankedB[i].name]});
+    }
+    const leftovers = rankedA.slice(n).concat(rankedB.slice(n));
+    leftovers.forEach(r=>{
+      groups.push({objectif:"En attente d'un binôme", players:[r.name]});
+    });
+  }
+  if(horsCamp.length){
+    groups.push({objectif:"Hors camps (poste non concerné)", players: horsCamp});
+  }
+
+  state.groups = groups;
+  state.picked = null;
+  renderGroups();
+  document.getElementById("groups-panel").style.display = "block";
+  document.getElementById("groups-panel").scrollIntoView({behavior:"smooth", block:"start"});
 });
 
 /* ---------- Génération des groupes ---------- */
@@ -635,6 +758,12 @@ function renderPrincipeSelect(){
 renderPhaseSelect();
 renderPrincipeSelect();
 
+function modeLabel(mode){
+  if(mode === "mixte") return "Mixte";
+  if(mode === "opposition") return "Opposition par poste";
+  return "Homogène";
+}
+
 /* ---------- Sauvegarde de la semaine ---------- */
 document.getElementById("week-date").valueAsDate = new Date();
 
@@ -708,6 +837,11 @@ function renderProfilesHeader(){
   nameLbl.style.textAlign = "left";
   nameLbl.textContent = "Joueur";
   header.appendChild(nameLbl);
+  ["Poste principal","Poste secondaire"].forEach(lbl=>{
+    const span = document.createElement("span");
+    span.textContent = lbl;
+    header.appendChild(span);
+  });
   ATTRS.forEach(a=>{
     const span = document.createElement("span");
     span.textContent = a.label;
@@ -727,6 +861,30 @@ function renderProfiles(){
     nameEl.className = "profile-name";
     nameEl.textContent = name;
     row.appendChild(nameEl);
+
+    const principalSel = document.createElement("select");
+    POSTES.forEach(pt=>{
+      const opt = document.createElement("option");
+      opt.value = pt; opt.textContent = pt;
+      if(state.profiles[name].poste_principal === pt) opt.selected = true;
+      principalSel.appendChild(opt);
+    });
+    principalSel.addEventListener("change", ()=>{ state.profiles[name].poste_principal = principalSel.value; });
+    row.appendChild(principalSel);
+
+    const secondaireSel = document.createElement("select");
+    const noneOpt = document.createElement("option");
+    noneOpt.value = ""; noneOpt.textContent = "Aucun";
+    if(!state.profiles[name].poste_secondaire) noneOpt.selected = true;
+    secondaireSel.appendChild(noneOpt);
+    POSTES.forEach(pt=>{
+      const opt = document.createElement("option");
+      opt.value = pt; opt.textContent = pt;
+      if(state.profiles[name].poste_secondaire === pt) opt.selected = true;
+      secondaireSel.appendChild(opt);
+    });
+    secondaireSel.addEventListener("change", ()=>{ state.profiles[name].poste_secondaire = secondaireSel.value; });
+    row.appendChild(secondaireSel);
 
     ATTRS.forEach(a=>{
       const seg = document.createElement("div");
@@ -798,7 +956,7 @@ async function renderHistory(){
     div.innerHTML = `
       <div class="h-top">
         <span class="h-date">Entraînement n°${item.numero || "?"} — ${item.date || "date inconnue"}</span>
-        <span class="h-meta">${item.mode === "mixte" ? "Mixte" : "Homogène"} · ${critLabel}</span>
+        <span class="h-meta">${modeLabel(item.mode)} · ${critLabel}</span>
       </div>
       ${(item.phase || item.principe) ? `<div class="h-meta" style="margin-top:4px;">${item.phase || ""}${item.phase && item.principe ? " — " : ""}${item.principe || ""}</div>` : ""}
       ${item.theme ? `<div class="h-meta" style="margin-top:2px;">Thème : ${item.theme}</div>` : ""}
