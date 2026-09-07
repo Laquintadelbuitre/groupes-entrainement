@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --board:#122A1E;
@@ -315,6 +316,7 @@
       </div>
       <div class="groups-grid" id="groups-grid"></div>
       <div class="actions-row">
+        <button class="btn" id="btn-export-excel">Exporter en Excel</button>
         <button class="btn primary" id="btn-validate">Valider et enregistrer la semaine</button>
       </div>
       <p class="status-msg" id="save-status"></p>
@@ -763,6 +765,71 @@ function modeLabel(mode){
   if(mode === "opposition") return "Opposition par poste";
   return "Homogène";
 }
+
+/* ---------- Export Excel ---------- */
+const EXPORT_COLORS = [
+  {name:"Rose",   header:"FFF48FB1", body:"FFFCE4EC"},
+  {name:"Bleu",   header:"FF90CAF9", body:"FFE3F2FD"},
+  {name:"Jaune",  header:"FFFFF176", body:"FFFFFDE7"}
+];
+
+document.getElementById("btn-export-excel").addEventListener("click", async ()=>{
+  if(!state.groups || !state.groups.length){ return; }
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Groupes");
+
+  const numero = document.getElementById("seance-num").value;
+  const date = document.getElementById("week-date").value;
+  const theme = document.getElementById("seance-theme").value.trim();
+  const phase = document.getElementById("seance-phase").value;
+  const principe = document.getElementById("seance-principe").value;
+
+  let infoLine = "Entraînement n°" + (numero || "?") + (date ? " — " + date : "");
+  if(theme) infoLine += " — " + theme;
+  ws.getCell("A1").value = infoLine;
+  ws.getCell("A1").font = {bold:true, size:13};
+  if(phase || principe){
+    ws.getCell("A2").value = [phase, principe].filter(Boolean).join(" — ");
+    ws.getCell("A2").font = {italic:true, size:11, color:{argb:"FF555555"}};
+  }
+
+  const startRow = 4;
+  const maxPlayers = Math.max(...state.groups.map(g=>g.players.length));
+
+  state.groups.forEach((grp, gi)=>{
+    const col = gi + 1;
+    const colors = EXPORT_COLORS[gi % EXPORT_COLORS.length];
+    const headerCell = ws.getRow(startRow).getCell(col);
+    headerCell.value = "Groupe " + (gi+1) + (grp.objectif ? " — " + grp.objectif : "");
+    headerCell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.header}};
+    headerCell.font = {bold:true, color:{argb:"FF1B1B1B"}};
+    headerCell.alignment = {wrapText:true, vertical:"middle"};
+
+    grp.players.forEach((name, pi)=>{
+      const cell = ws.getRow(startRow + 1 + pi).getCell(col);
+      cell.value = name;
+      cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.body}};
+    });
+
+    ws.getColumn(col).width = 22;
+  });
+
+  for(let r = startRow; r <= startRow + maxPlayers; r++){
+    ws.getRow(r).height = 20;
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const fname = "groupes" + (numero ? "-entrainement-" + numero : "") + (date ? "-" + date : "") + ".xlsx";
+  a.href = url;
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
 
 /* ---------- Sauvegarde de la semaine ---------- */
 document.getElementById("week-date").valueAsDate = new Date();
