@@ -61,6 +61,14 @@
   nav.tabs button.active{color:var(--gold); border-bottom-color:var(--gold);}
   nav.tabs button:hover{color:var(--chalk);}
 
+  .educ-tabs{display:flex; gap:8px; margin-bottom:16px;}
+  .educ-tabs button{
+    background:none; border:1px solid var(--line-strong); color:var(--chalk-dim);
+    font-family:'Oswald', sans-serif; font-size:13.5px; letter-spacing:0.3px;
+    padding:7px 16px; border-radius:20px; cursor:pointer; transition:all .15s;
+  }
+  .educ-tabs button.active{background:var(--gold); color:#12200f; border-color:var(--gold); font-weight:600;}
+
   section.tab{display:none; padding-top:24px;}
   section.tab.active{display:block;}
 
@@ -329,7 +337,8 @@
   <section class="tab" id="tab-profils">
     <div class="board-panel">
       <h2>Profils des joueurs</h2>
-      <p class="subtitle" style="margin-bottom:16px;">Un niveau par attribut, indépendant de tout autre suivi. Modifiable à tout moment.</p>
+      <p class="subtitle" style="margin-bottom:10px;">Un niveau par attribut, indépendant de tout autre suivi. Chaque éducateur a sa propre vision ; les groupes sont générés à partir de la moyenne des deux.</p>
+      <div class="educ-tabs" id="educ-tabs"></div>
       <div class="profile-grid-wrap">
         <div class="profile-row header" id="profiles-header"></div>
         <div id="profiles-body"></div>
@@ -418,10 +427,12 @@ const PRINCIPES_PAR_PHASE = {
   ]
 };
 const PHASES_JEU = Object.keys(PRINCIPES_PAR_PHASE);
+const EDUCATEURS = ["Abdoulaye","Tom"];
 
 /* ---------- État ---------- */
 let state = {
-  profiles: {},          // { name: {technique:'moyen', vitesse:'moyen', ...} }
+  profilesByEduc: {},    // { Abdoulaye: { name: {technique:'moyen', ...} }, Tom: {...} }
+  activeEducateur: "Abdoulaye",
   presentSet: new Set(PLAYERS),
   selectedAttrs: new Set(),
   mode: "homogene",
@@ -429,42 +440,55 @@ let state = {
   picked: null            // joueur sélectionné pour déplacement manuel
 };
 
-const LS_PROFILES = "groupes_entrainement_profiles_v1";
+const LS_PROFILES = "groupes_entrainement_profiles_v2";
 const LS_HISTORY = "groupes_entrainement_history_v1";
 const LS_API = "groupes_entrainement_api_url_v1";
 const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbxVxWGmzB6z3FPuU7TBNAA3vkpPTyVEqZblbRzH23g2PmtjbJBuASUp12g4_HXiEHcfyg/exec";
+
+function defaultProfile(){
+  const profile = {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
+  ATTRS.forEach(a => profile[a.key] = "moyen");
+  return profile;
+}
+function ensurePlayerFields(p){
+  if(p.poste_principal === undefined) p.poste_principal = "Milieu";
+  if(p.secteur_principal === undefined) p.secteur_principal = "";
+  if(p.poste_secondaire === undefined) p.poste_secondaire = "";
+  if(p.secteur_secondaire === undefined) p.secteur_secondaire = "";
+  ATTRS.forEach(a=>{ if(p[a.key] === undefined) p[a.key] = "moyen"; });
+  return p;
+}
 
 function loadLocalProfiles(){
   const raw = localStorage.getItem(LS_PROFILES);
   if(raw){
     try{
       const parsed = JSON.parse(raw);
-      // migration : s'assurer que chaque joueur a bien les champs de poste
-      PLAYERS.forEach(p=>{
-        if(!parsed[p]) parsed[p] = {};
-        if(parsed[p].poste_principal === undefined) parsed[p].poste_principal = "Milieu";
-        if(parsed[p].secteur_principal === undefined) parsed[p].secteur_principal = "";
-        if(parsed[p].poste_secondaire === undefined) parsed[p].poste_secondaire = "";
-        if(parsed[p].secteur_secondaire === undefined) parsed[p].secteur_secondaire = "";
-        ATTRS.forEach(a=>{ if(parsed[p][a.key] === undefined) parsed[p][a.key] = "moyen"; });
+      const looksNew = EDUCATEURS.some(e => parsed[e] !== undefined);
+      const result = {};
+      EDUCATEURS.forEach(e=>{
+        result[e] = {};
+        PLAYERS.forEach(p=>{
+          const existing = looksNew ? (parsed[e] && parsed[e][p]) : (e === "Abdoulaye" ? parsed[p] : null);
+          result[e][p] = existing ? ensurePlayerFields({...existing}) : defaultProfile();
+        });
       });
-      return parsed;
+      return result;
     }catch(e){}
   }
-  const def = {};
-  PLAYERS.forEach(p => {
-    const profile = {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
-    ATTRS.forEach(a => profile[a.key] = "moyen");
-    def[p] = profile;
+  const result = {};
+  EDUCATEURS.forEach(e=>{
+    result[e] = {};
+    PLAYERS.forEach(p=> result[e][p] = defaultProfile());
   });
-  return def;
+  return result;
 }
-function saveLocalProfiles(){ localStorage.setItem(LS_PROFILES, JSON.stringify(state.profiles)); }
+function saveLocalProfiles(){ localStorage.setItem(LS_PROFILES, JSON.stringify(state.profilesByEduc)); }
 
 function getApiUrl(){ return localStorage.getItem(LS_API) || DEFAULT_API_URL; }
 
 /* ---------- Init ---------- */
-state.profiles = loadLocalProfiles();
+state.profilesByEduc = loadLocalProfiles();
 
 /* ---------- Onglets ---------- */
 document.querySelectorAll(".tab-btn").forEach(btn=>{
@@ -561,16 +585,22 @@ document.querySelectorAll("#opposition-output-toggle button").forEach(btn=>{
 });
 
 function matchesPostes(name, posteSet){
-  const p = state.profiles[name];
-  if(!p) return false;
-  return posteSet.has(p.poste_principal) || (p.poste_secondaire && posteSet.has(p.poste_secondaire));
+  return EDUCATEURS.some(e=>{
+    const p = state.profilesByEduc[e][name];
+    if(!p) return false;
+    return posteSet.has(p.poste_principal) || (p.poste_secondaire && posteSet.has(p.poste_secondaire));
+  });
 }
 
 function playerSecteurForCamp(name, posteSet){
-  const p = state.profiles[name];
-  if(!p) return "";
-  if(posteSet.has(p.poste_principal)) return p.secteur_principal || "";
-  if(p.poste_secondaire && posteSet.has(p.poste_secondaire)) return p.secteur_secondaire || "";
+  // Prend la première correspondance trouvée, éducateur par éducateur
+  // (Abdoulaye d'abord, puis Tom), poste principal puis secondaire.
+  for(const e of EDUCATEURS){
+    const p = state.profilesByEduc[e][name];
+    if(!p) continue;
+    if(posteSet.has(p.poste_principal)) return p.secteur_principal || "";
+    if(p.poste_secondaire && posteSet.has(p.poste_secondaire)) return p.secteur_secondaire || "";
+  }
   return "";
 }
 
@@ -656,10 +686,14 @@ document.getElementById("btn-generate-opposition").addEventListener("click", ()=
 
 /* ---------- Génération des groupes ---------- */
 function levelVal(name, attrKey){
-  const p = state.profiles[name] || {};
-  const lvlKey = p[attrKey] || "moyen";
-  const lvl = LEVELS.find(l=>l.key===lvlKey);
-  return lvl ? lvl.val : 2;
+  // Moyenne des notes des 2 éducateurs pour cet attribut (agrégation des visions)
+  const vals = EDUCATEURS.map(e=>{
+    const p = state.profilesByEduc[e][name] || {};
+    const lvlKey = p[attrKey] || "moyen";
+    const lvl = LEVELS.find(l=>l.key===lvlKey);
+    return lvl ? lvl.val : 2;
+  });
+  return vals.reduce((s,v)=>s+v,0) / vals.length;
 }
 function scoreFor(name){
   const attrs = [...state.selectedAttrs];
@@ -963,8 +997,25 @@ function renderProfilesHeader(){
   });
 }
 
+function renderEducTabs(){
+  const el = document.getElementById("educ-tabs");
+  el.innerHTML = "";
+  EDUCATEURS.forEach(e=>{
+    const btn = document.createElement("button");
+    btn.textContent = e;
+    btn.className = state.activeEducateur === e ? "active" : "";
+    btn.addEventListener("click", ()=>{
+      state.activeEducateur = e;
+      renderEducTabs();
+      renderProfiles();
+    });
+    el.appendChild(btn);
+  });
+}
+
 function renderProfiles(){
   renderProfilesHeader();
+  const educProfiles = state.profilesByEduc[state.activeEducateur];
   const body = document.getElementById("profiles-body");
   body.innerHTML = "";
   PLAYERS.forEach(name=>{
@@ -980,7 +1031,7 @@ function renderProfiles(){
     POSTES.forEach(pt=>{
       const opt = document.createElement("option");
       opt.value = pt; opt.textContent = pt;
-      if(state.profiles[name].poste_principal === pt) opt.selected = true;
+      if(educProfiles[name].poste_principal === pt) opt.selected = true;
       principalSel.appendChild(opt);
     });
     row.appendChild(principalSel);
@@ -1002,25 +1053,25 @@ function renderProfiles(){
     function refreshSecteurPrincipal(){
       const isGardien = principalSel.value === "Gardien";
       secteurPrincipalSel.disabled = isGardien;
-      if(isGardien){ state.profiles[name].secteur_principal = ""; }
-      fillSecteur(secteurPrincipalSel, state.profiles[name].secteur_principal);
+      if(isGardien){ educProfiles[name].secteur_principal = ""; }
+      fillSecteur(secteurPrincipalSel, educProfiles[name].secteur_principal);
     }
     principalSel.addEventListener("change", ()=>{
-      state.profiles[name].poste_principal = principalSel.value;
+      educProfiles[name].poste_principal = principalSel.value;
       refreshSecteurPrincipal();
     });
-    secteurPrincipalSel.addEventListener("change", ()=>{ state.profiles[name].secteur_principal = secteurPrincipalSel.value; });
+    secteurPrincipalSel.addEventListener("change", ()=>{ educProfiles[name].secteur_principal = secteurPrincipalSel.value; });
     refreshSecteurPrincipal();
 
     const secondaireSel = document.createElement("select");
     const noneOpt = document.createElement("option");
     noneOpt.value = ""; noneOpt.textContent = "Aucun";
-    if(!state.profiles[name].poste_secondaire) noneOpt.selected = true;
+    if(!educProfiles[name].poste_secondaire) noneOpt.selected = true;
     secondaireSel.appendChild(noneOpt);
     POSTES.forEach(pt=>{
       const opt = document.createElement("option");
       opt.value = pt; opt.textContent = pt;
-      if(state.profiles[name].poste_secondaire === pt) opt.selected = true;
+      if(educProfiles[name].poste_secondaire === pt) opt.selected = true;
       secondaireSel.appendChild(opt);
     });
     row.appendChild(secondaireSel);
@@ -1028,16 +1079,16 @@ function renderProfiles(){
     const secteurSecondaireSel = document.createElement("select");
     row.appendChild(secteurSecondaireSel);
     function refreshSecteurSecondaire(){
-      const disabled = !state.profiles[name].poste_secondaire || state.profiles[name].poste_secondaire === "Gardien";
+      const disabled = !educProfiles[name].poste_secondaire || educProfiles[name].poste_secondaire === "Gardien";
       secteurSecondaireSel.disabled = disabled;
-      if(disabled){ state.profiles[name].secteur_secondaire = ""; }
-      fillSecteur(secteurSecondaireSel, state.profiles[name].secteur_secondaire);
+      if(disabled){ educProfiles[name].secteur_secondaire = ""; }
+      fillSecteur(secteurSecondaireSel, educProfiles[name].secteur_secondaire);
     }
     secondaireSel.addEventListener("change", ()=>{
-      state.profiles[name].poste_secondaire = secondaireSel.value;
+      educProfiles[name].poste_secondaire = secondaireSel.value;
       refreshSecteurSecondaire();
     });
-    secteurSecondaireSel.addEventListener("change", ()=>{ state.profiles[name].secteur_secondaire = secteurSecondaireSel.value; });
+    secteurSecondaireSel.addEventListener("change", ()=>{ educProfiles[name].secteur_secondaire = secteurSecondaireSel.value; });
     refreshSecteurSecondaire();
 
     ATTRS.forEach(a=>{
@@ -1047,9 +1098,9 @@ function renderProfiles(){
         const lvl = LEVELS.find(l=>l.key===lvlKey);
         const b = document.createElement("button");
         b.textContent = lvl.label;
-        b.className = "lvl-" + lvlKey + (state.profiles[name][a.key] === lvlKey ? " active" : "");
+        b.className = "lvl-" + lvlKey + (educProfiles[name][a.key] === lvlKey ? " active" : "");
         b.addEventListener("click", ()=>{
-          state.profiles[name][a.key] = lvlKey;
+          educProfiles[name][a.key] = lvlKey;
           renderProfiles();
         });
         seg.appendChild(b);
@@ -1063,9 +1114,10 @@ function renderProfiles(){
 document.getElementById("btn-save-profiles").addEventListener("click", async ()=>{
   saveLocalProfiles();
   const statusEl = document.getElementById("profiles-status");
+  const educateur = state.activeEducateur;
   const api = getApiUrl();
   if(!api){
-    statusEl.textContent = "Profils enregistrés dans ce navigateur.";
+    statusEl.textContent = "Profils de " + educateur + " enregistrés dans ce navigateur.";
     return;
   }
   statusEl.textContent = "Enregistrement…";
@@ -1073,9 +1125,9 @@ document.getElementById("btn-save-profiles").addEventListener("click", async ()=
     await fetch(api, {
       method:"POST",
       headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body: JSON.stringify({action:"saveProfiles", data: state.profiles})
+      body: JSON.stringify({action:"saveProfiles", data:{educateur, profiles: state.profilesByEduc[educateur]}})
     });
-    statusEl.textContent = "Profils enregistrés dans le Google Sheet ✓";
+    statusEl.textContent = "Profils de " + educateur + " enregistrés dans le Google Sheet ✓";
   }catch(err){
     statusEl.textContent = "Sauvegardés localement seulement (échec de connexion au Sheet).";
   }
@@ -1162,6 +1214,7 @@ document.getElementById("btn-test-url").addEventListener("click", async ()=>{
 /* ---------- Démarrage ---------- */
 renderPresentList();
 renderAttrList();
+renderEducTabs();
 renderProfiles();
 
 async function loadProfilesFromApi(){
@@ -1170,14 +1223,21 @@ async function loadProfilesFromApi(){
   try{
     const res = await fetch(api + "?action=getProfiles");
     const json = await res.json();
-    if(json && typeof json === "object" && Object.keys(json).length){
-      PLAYERS.forEach(name=>{
-        if(json[name]) state.profiles[name] = json[name];
+    if(json && typeof json === "object"){
+      EDUCATEURS.forEach(e=>{
+        if(json[e] && Object.keys(json[e]).length){
+          PLAYERS.forEach(name=>{
+            if(json[e][name]) state.profilesByEduc[e][name] = ensureplayerFieldsSafe(json[e][name]);
+          });
+        }
       });
       saveLocalProfiles();
       renderProfiles();
     }
   }catch(err){ /* on garde les profils locaux */ }
+}
+function ensureplayerFieldsSafe(p){
+  try{ return ensurePlayerFields({...p}); }catch(e){ return p; }
 }
 loadProfilesFromApi();
 </script>
