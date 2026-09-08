@@ -337,7 +337,6 @@
   <section class="tab" id="tab-profils">
     <div class="board-panel">
       <h2>Profils des joueurs</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Un niveau par attribut, indépendant de tout autre suivi. Chaque éducateur a sa propre vision ; les groupes sont générés à partir de la moyenne des deux.</p>
       <div class="educ-tabs" id="educ-tabs"></div>
       <div class="profile-grid-wrap">
         <div class="profile-row header" id="profiles-header"></div>
@@ -426,12 +425,12 @@ const PRINCIPES_PAR_PHASE = {
     "Anticiper, s'ajuster pour intervenir"
   ]
 };
+/* ---------- État ---------- */
 const PHASES_JEU = Object.keys(PRINCIPES_PAR_PHASE);
 const EDUCATEURS = ["Abdoulaye","Tom"];
-
-/* ---------- État ---------- */
 let state = {
-  profilesByEduc: {},    // { Abdoulaye: { name: {technique:'moyen', ...} }, Tom: {...} }
+  postes: {},             // { name: {poste_principal, secteur_principal, poste_secondaire, secteur_secondaire} } — partagé
+  profilesByEduc: {},     // { Abdoulaye: { name: {technique:'moyen', ...} }, Tom: {...} } — attributs techniques uniquement
   activeEducateur: "Abdoulaye",
   presentSet: new Set(PLAYERS),
   selectedAttrs: new Set(),
@@ -440,55 +439,98 @@ let state = {
   picked: null            // joueur sélectionné pour déplacement manuel
 };
 
-const LS_PROFILES = "groupes_entrainement_profiles_v2";
+const LS_POSTES = "groupes_entrainement_postes_v1";
+const LS_PROFILES = "groupes_entrainement_profiles_v3";
+const LS_PROFILES_LEGACY_V2 = "groupes_entrainement_profiles_v2";
 const LS_HISTORY = "groupes_entrainement_history_v1";
 const LS_API = "groupes_entrainement_api_url_v1";
 const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbxVxWGmzB6z3FPuU7TBNAA3vkpPTyVEqZblbRzH23g2PmtjbJBuASUp12g4_HXiEHcfyg/exec";
 
-function defaultProfile(){
-  const profile = {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
-  ATTRS.forEach(a => profile[a.key] = "moyen");
-  return profile;
+function defaultPostes(){
+  return {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
 }
-function ensurePlayerFields(p){
+function defaultAttrs(){
+  const o = {};
+  ATTRS.forEach(a => o[a.key] = "moyen");
+  return o;
+}
+function ensurePosteFields(p){
+  p = p || {};
   if(p.poste_principal === undefined) p.poste_principal = "Milieu";
   if(p.secteur_principal === undefined) p.secteur_principal = "";
   if(p.poste_secondaire === undefined) p.poste_secondaire = "";
   if(p.secteur_secondaire === undefined) p.secteur_secondaire = "";
+  return p;
+}
+function ensureAttrFields(p){
+  p = p || {};
   ATTRS.forEach(a=>{ if(p[a.key] === undefined) p[a.key] = "moyen"; });
   return p;
 }
 
-function loadLocalProfiles(){
-  const raw = localStorage.getItem(LS_PROFILES);
-  if(raw){
-    try{
-      const parsed = JSON.parse(raw);
-      const looksNew = EDUCATEURS.some(e => parsed[e] !== undefined);
-      const result = {};
-      EDUCATEURS.forEach(e=>{
-        result[e] = {};
-        PLAYERS.forEach(p=>{
-          const existing = looksNew ? (parsed[e] && parsed[e][p]) : (e === "Abdoulaye" ? parsed[p] : null);
-          result[e][p] = existing ? ensurePlayerFields({...existing}) : defaultProfile();
-        });
-      });
-      return result;
-    }catch(e){}
+function loadPostes(){
+  const raw = localStorage.getItem(LS_POSTES);
+  let postes;
+  if(raw){ try{ postes = JSON.parse(raw); }catch(e){} }
+  if(!postes){
+    // migration depuis l'ancien format où le poste était stocké côté Abdoulaye
+    const legacy = localStorage.getItem(LS_PROFILES_LEGACY_V2);
+    if(legacy){
+      try{
+        const parsed = JSON.parse(legacy);
+        const src = parsed.Abdoulaye || {};
+        postes = {};
+        PLAYERS.forEach(p=> postes[p] = ensurePosteFields({...(src[p]||{})}));
+      }catch(e){}
+    }
   }
-  const result = {};
-  EDUCATEURS.forEach(e=>{
-    result[e] = {};
-    PLAYERS.forEach(p=> result[e][p] = defaultProfile());
-  });
+  if(!postes) postes = {};
+  PLAYERS.forEach(p=>{ postes[p] = ensurePosteFields(postes[p]); });
+  return postes;
+}
+
+function loadProfilesByEduc(){
+  const raw = localStorage.getItem(LS_PROFILES);
+  let result;
+  if(raw){ try{ result = JSON.parse(raw); }catch(e){} }
+  if(!result){
+    const legacy = localStorage.getItem(LS_PROFILES_LEGACY_V2);
+    if(legacy){
+      try{
+        const parsed = JSON.parse(legacy);
+        result = {};
+        EDUCATEURS.forEach(e=>{
+          result[e] = {};
+          PLAYERS.forEach(p=> result[e][p] = ensureAttrFields({...((parsed[e]&&parsed[e][p])||{})}));
+        });
+      }catch(e){}
+    }
+  }
+  if(!result){
+    result = {};
+    EDUCATEURS.forEach(e=>{
+      result[e] = {};
+      PLAYERS.forEach(p=> result[e][p] = defaultAttrs());
+    });
+  } else {
+    EDUCATEURS.forEach(e=>{
+      if(!result[e]) result[e] = {};
+      PLAYERS.forEach(p=>{ result[e][p] = ensureAttrFields(result[e][p]); });
+    });
+  }
   return result;
 }
-function saveLocalProfiles(){ localStorage.setItem(LS_PROFILES, JSON.stringify(state.profilesByEduc)); }
+
+function saveLocalData(){
+  localStorage.setItem(LS_POSTES, JSON.stringify(state.postes));
+  localStorage.setItem(LS_PROFILES, JSON.stringify(state.profilesByEduc));
+}
 
 function getApiUrl(){ return localStorage.getItem(LS_API) || DEFAULT_API_URL; }
 
 /* ---------- Init ---------- */
-state.profilesByEduc = loadLocalProfiles();
+state.postes = loadPostes();
+state.profilesByEduc = loadProfilesByEduc();
 
 /* ---------- Onglets ---------- */
 document.querySelectorAll(".tab-btn").forEach(btn=>{
@@ -585,22 +627,16 @@ document.querySelectorAll("#opposition-output-toggle button").forEach(btn=>{
 });
 
 function matchesPostes(name, posteSet){
-  return EDUCATEURS.some(e=>{
-    const p = state.profilesByEduc[e][name];
-    if(!p) return false;
-    return posteSet.has(p.poste_principal) || (p.poste_secondaire && posteSet.has(p.poste_secondaire));
-  });
+  const p = state.postes[name];
+  if(!p) return false;
+  return posteSet.has(p.poste_principal) || (p.poste_secondaire && posteSet.has(p.poste_secondaire));
 }
 
 function playerSecteurForCamp(name, posteSet){
-  // Prend la première correspondance trouvée, éducateur par éducateur
-  // (Abdoulaye d'abord, puis Tom), poste principal puis secondaire.
-  for(const e of EDUCATEURS){
-    const p = state.profilesByEduc[e][name];
-    if(!p) continue;
-    if(posteSet.has(p.poste_principal)) return p.secteur_principal || "";
-    if(p.poste_secondaire && posteSet.has(p.poste_secondaire)) return p.secteur_secondaire || "";
-  }
+  const p = state.postes[name];
+  if(!p) return "";
+  if(posteSet.has(p.poste_principal)) return p.secteur_principal || "";
+  if(p.poste_secondaire && posteSet.has(p.poste_secondaire)) return p.secteur_secondaire || "";
   return "";
 }
 
@@ -985,7 +1021,7 @@ function renderProfilesHeader(){
   nameLbl.style.textAlign = "left";
   nameLbl.textContent = "Joueur";
   header.appendChild(nameLbl);
-  ["Poste principal","Secteur","Poste secondaire","Secteur"].forEach(lbl=>{
+  ["Poste principal (commun)","Secteur","Poste secondaire (commun)","Secteur"].forEach(lbl=>{
     const span = document.createElement("span");
     span.textContent = lbl;
     header.appendChild(span);
@@ -1016,6 +1052,7 @@ function renderEducTabs(){
 function renderProfiles(){
   renderProfilesHeader();
   const educProfiles = state.profilesByEduc[state.activeEducateur];
+  const postes = state.postes;
   const body = document.getElementById("profiles-body");
   body.innerHTML = "";
   PLAYERS.forEach(name=>{
@@ -1031,7 +1068,7 @@ function renderProfiles(){
     POSTES.forEach(pt=>{
       const opt = document.createElement("option");
       opt.value = pt; opt.textContent = pt;
-      if(educProfiles[name].poste_principal === pt) opt.selected = true;
+      if(postes[name].poste_principal === pt) opt.selected = true;
       principalSel.appendChild(opt);
     });
     row.appendChild(principalSel);
@@ -1053,25 +1090,25 @@ function renderProfiles(){
     function refreshSecteurPrincipal(){
       const isGardien = principalSel.value === "Gardien";
       secteurPrincipalSel.disabled = isGardien;
-      if(isGardien){ educProfiles[name].secteur_principal = ""; }
-      fillSecteur(secteurPrincipalSel, educProfiles[name].secteur_principal);
+      if(isGardien){ postes[name].secteur_principal = ""; }
+      fillSecteur(secteurPrincipalSel, postes[name].secteur_principal);
     }
     principalSel.addEventListener("change", ()=>{
-      educProfiles[name].poste_principal = principalSel.value;
+      postes[name].poste_principal = principalSel.value;
       refreshSecteurPrincipal();
     });
-    secteurPrincipalSel.addEventListener("change", ()=>{ educProfiles[name].secteur_principal = secteurPrincipalSel.value; });
+    secteurPrincipalSel.addEventListener("change", ()=>{ postes[name].secteur_principal = secteurPrincipalSel.value; });
     refreshSecteurPrincipal();
 
     const secondaireSel = document.createElement("select");
     const noneOpt = document.createElement("option");
     noneOpt.value = ""; noneOpt.textContent = "Aucun";
-    if(!educProfiles[name].poste_secondaire) noneOpt.selected = true;
+    if(!postes[name].poste_secondaire) noneOpt.selected = true;
     secondaireSel.appendChild(noneOpt);
     POSTES.forEach(pt=>{
       const opt = document.createElement("option");
       opt.value = pt; opt.textContent = pt;
-      if(educProfiles[name].poste_secondaire === pt) opt.selected = true;
+      if(postes[name].poste_secondaire === pt) opt.selected = true;
       secondaireSel.appendChild(opt);
     });
     row.appendChild(secondaireSel);
@@ -1079,16 +1116,16 @@ function renderProfiles(){
     const secteurSecondaireSel = document.createElement("select");
     row.appendChild(secteurSecondaireSel);
     function refreshSecteurSecondaire(){
-      const disabled = !educProfiles[name].poste_secondaire || educProfiles[name].poste_secondaire === "Gardien";
+      const disabled = !postes[name].poste_secondaire || postes[name].poste_secondaire === "Gardien";
       secteurSecondaireSel.disabled = disabled;
-      if(disabled){ educProfiles[name].secteur_secondaire = ""; }
-      fillSecteur(secteurSecondaireSel, educProfiles[name].secteur_secondaire);
+      if(disabled){ postes[name].secteur_secondaire = ""; }
+      fillSecteur(secteurSecondaireSel, postes[name].secteur_secondaire);
     }
     secondaireSel.addEventListener("change", ()=>{
-      educProfiles[name].poste_secondaire = secondaireSel.value;
+      postes[name].poste_secondaire = secondaireSel.value;
       refreshSecteurSecondaire();
     });
-    secteurSecondaireSel.addEventListener("change", ()=>{ educProfiles[name].secteur_secondaire = secteurSecondaireSel.value; });
+    secteurSecondaireSel.addEventListener("change", ()=>{ postes[name].secteur_secondaire = secteurSecondaireSel.value; });
     refreshSecteurSecondaire();
 
     ATTRS.forEach(a=>{
@@ -1112,12 +1149,12 @@ function renderProfiles(){
 }
 
 document.getElementById("btn-save-profiles").addEventListener("click", async ()=>{
-  saveLocalProfiles();
+  saveLocalData();
   const statusEl = document.getElementById("profiles-status");
   const educateur = state.activeEducateur;
   const api = getApiUrl();
   if(!api){
-    statusEl.textContent = "Profils de " + educateur + " enregistrés dans ce navigateur.";
+    statusEl.textContent = "Postes (communs) et profils techniques de " + educateur + " enregistrés dans ce navigateur.";
     return;
   }
   statusEl.textContent = "Enregistrement…";
@@ -1125,9 +1162,14 @@ document.getElementById("btn-save-profiles").addEventListener("click", async ()=
     await fetch(api, {
       method:"POST",
       headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({action:"savePostes", data: state.postes})
+    });
+    await fetch(api, {
+      method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
       body: JSON.stringify({action:"saveProfiles", data:{educateur, profiles: state.profilesByEduc[educateur]}})
     });
-    statusEl.textContent = "Profils de " + educateur + " enregistrés dans le Google Sheet ✓";
+    statusEl.textContent = "Postes (communs) et profils techniques de " + educateur + " enregistrés dans le Google Sheet ✓";
   }catch(err){
     statusEl.textContent = "Sauvegardés localement seulement (échec de connexion au Sheet).";
   }
@@ -1221,23 +1263,29 @@ async function loadProfilesFromApi(){
   const api = getApiUrl();
   if(!api) return;
   try{
-    const res = await fetch(api + "?action=getProfiles");
-    const json = await res.json();
-    if(json && typeof json === "object"){
+    const [resPostes, resProfiles] = await Promise.all([
+      fetch(api + "?action=getPostes"),
+      fetch(api + "?action=getProfiles")
+    ]);
+    const jsonPostes = await resPostes.json();
+    if(jsonPostes && typeof jsonPostes === "object" && Object.keys(jsonPostes).length){
+      PLAYERS.forEach(name=>{
+        if(jsonPostes[name]) state.postes[name] = ensurePosteFields({...jsonPostes[name]});
+      });
+    }
+    const jsonProfiles = await resProfiles.json();
+    if(jsonProfiles && typeof jsonProfiles === "object"){
       EDUCATEURS.forEach(e=>{
-        if(json[e] && Object.keys(json[e]).length){
+        if(jsonProfiles[e] && Object.keys(jsonProfiles[e]).length){
           PLAYERS.forEach(name=>{
-            if(json[e][name]) state.profilesByEduc[e][name] = ensureplayerFieldsSafe(json[e][name]);
+            if(jsonProfiles[e][name]) state.profilesByEduc[e][name] = ensureAttrFields({...jsonProfiles[e][name]});
           });
         }
       });
-      saveLocalProfiles();
-      renderProfiles();
     }
-  }catch(err){ /* on garde les profils locaux */ }
-}
-function ensureplayerFieldsSafe(p){
-  try{ return ensurePlayerFields({...p}); }catch(e){ return p; }
+    saveLocalData();
+    renderProfiles();
+  }catch(err){ /* on garde les données locales */ }
 }
 loadProfilesFromApi();
 </script>
