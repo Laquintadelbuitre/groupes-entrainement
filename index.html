@@ -48,6 +48,12 @@
   }
   h1 span{color:var(--gold);}
   .subtitle{color:var(--chalk-dim); font-size:15px; margin:0; max-width:60ch; line-height:1.5;}
+  .sync-line{display:flex; align-items:center; gap:7px; margin:12px 0 0; font-size:12.5px; color:var(--chalk-dim);}
+  .sync-dot{width:8px; height:8px; border-radius:50%; background:var(--chalk-dim); flex-shrink:0; transition:background .2s;}
+  .sync-dot.ok{background:#7FC77F;}
+  .sync-dot.error{background:var(--red-chalk);}
+  .sync-dot.loading{background:var(--gold); animation:pulse 1s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:0.35;}}
 
   nav.tabs{
     display:flex; gap:2px; margin-top:22px; border-bottom:1px dashed var(--line-strong); flex-wrap:wrap;
@@ -220,6 +226,11 @@
   <header>
     <h1>Groupes d'<span>Entraînement</span></h1>
     <p class="subtitle">Compose les groupes de la séance selon ce qui compte vraiment ce jour-là — technique, vitesse, volume ou prise d'information — puis ajuste à la main avant de valider.</p>
+    <p class="sync-line">
+      <span class="sync-dot" id="sync-dot"></span>
+      <span id="sync-status">Connexion au Google Sheet…</span>
+      <button class="btn small" id="btn-refresh-all" type="button" style="margin-left:10px;">Actualiser</button>
+    </p>
   </header>
 
   <nav class="tabs">
@@ -452,6 +463,41 @@ const LS_PROFILES_LEGACY_V2 = "groupes_entrainement_profiles_v2";
 const LS_HISTORY = "groupes_entrainement_history_v1";
 const LS_API = "groupes_entrainement_api_url_v1";
 const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbxVxWGmzB6z3FPuU7TBNAA3vkpPTyVEqZblbRzH23g2PmtjbJBuASUp12g4_HXiEHcfyg/exec";
+
+// Timeout pour ne jamais laisser une requête tourner indéfiniment sur un
+// réseau mobile lent — au-delà, on abandonne et on prévient l'utilisateur
+// plutôt que de laisser "Chargement…" tourner sans fin.
+const FETCH_TIMEOUT_MS = 15000;
+
+async function apiFetch(url, options){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), FETCH_TIMEOUT_MS);
+  // cache:"no-store" + paramètre anti-cache : Safari iOS (surtout en PWA
+  // ajoutée à l'écran d'accueil) met parfois en cache les réponses GET, ce
+  // qui peut faire apparaître des données périmées sur mobile/tablette.
+  const sep = url.includes("?") ? "&" : "?";
+  const bustedUrl = url + sep + "_=" + Date.now();
+  try{
+    const res = await fetch(bustedUrl, {...(options||{}), cache:"no-store", signal:controller.signal});
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// État de synchronisation partagé, affiché dans l'en-tête pour que
+// l'utilisateur sache si ce qu'il voit vient bien d'être resynchronisé
+// avec le Google Sheet ou s'il s'agit encore de données locales/anciennes.
+let lastSyncAt = null;
+function setSyncStatus(text, kind){
+  const el = document.getElementById("sync-status");
+  if(el) el.textContent = text;
+  const dot = document.getElementById("sync-dot");
+  if(dot) dot.className = "sync-dot" + (kind ? " " + kind : "");
+}
+function formatHeure(d){
+  return d.getHours().toString().padStart(2,"0") + "h" + d.getMinutes().toString().padStart(2,"0");
+}
 
 function defaultPostes(){
   return {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
@@ -958,21 +1004,17 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
 /* ---------- Sauvegarde de la semaine ---------- */
 document.getElementById("week-date").valueAsDate = new Date();
 
-async function suggestNextSeanceNum(){
-  let items = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
-  const api = getApiUrl();
-  if(api){
-    try{
-      const res = await fetch(api + "?action=getHistory");
-      const json = await res.json();
-      if(Array.isArray(json) && json.length) items = json;
-    }catch(err){ /* on garde l'historique local */ }
-  }
-  const nums = items.map(it => parseInt(it.numero, 10)).filter(n => !isNaN(n));
+// Cache d'historique partagé par tout l'outil (numéro suggéré + onglet
+// Historique), pour n'avoir à interroger le Sheet qu'une fois par
+// rafraîchissement plutôt qu'à chaque écran consulté.
+state.historyCache = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
+
+function applySuggestedNum(){
+  const nums = state.historyCache.map(it => parseInt(it.numero, 10)).filter(n => !isNaN(n));
   const next = nums.length ? Math.max(...nums) + 1 : 1;
   document.getElementById("seance-num").value = next;
 }
-suggestNextSeanceNum();
+applySuggestedNum();
 
 document.getElementById("btn-validate").addEventListener("click", async ()=>{
   const date = document.getElementById("week-date").value;
@@ -992,30 +1034,38 @@ document.getElementById("btn-validate").addEventListener("click", async ()=>{
     groupes: state.groups.map(g=>({objectif:g.objectif, joueurs:g.players}))
   };
 
-  // sauvegarde locale systématique
-  const hist = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
-  hist.unshift(payload);
-  localStorage.setItem(LS_HISTORY, JSON.stringify(hist));
+  // sauvegarde locale systématique — un seul groupe conservé par jour,
+  // comme côté Sheet : on remplace l'entrée existante pour cette date
+  // plutôt que d'empiler un doublon.
+  state.historyCache = state.historyCache.filter(it => it.date !== date);
+  state.historyCache.unshift(payload);
+  localStorage.setItem(LS_HISTORY, JSON.stringify(state.historyCache));
 
   const api = getApiUrl();
   if(!api){
     statusEl.textContent = "Enregistré dans ce navigateur (aucune URL de Sheet configurée).";
-    suggestNextSeanceNum();
+    applySuggestedNum();
     document.getElementById("seance-theme").value = "";
     return;
   }
   statusEl.textContent = "Enregistrement…";
   try{
-    await fetch(api, {
+    await apiFetch(api, {
       method:"POST",
       headers:{"Content-Type":"text/plain;charset=utf-8"},
       body: JSON.stringify({action:"saveWeek", data:payload})
     });
     statusEl.textContent = "Semaine enregistrée dans le Google Sheet ✓";
-    suggestNextSeanceNum();
+    applySuggestedNum();
     document.getElementById("seance-theme").value = "";
+    lastSyncAt = new Date();
+    setSyncStatus("À jour (Sheet synchronisé à " + formatHeure(lastSyncAt) + ")", "ok");
   }catch(err){
-    statusEl.textContent = "Sauvegardé localement seulement (échec de connexion au Sheet).";
+    const label = (err && err.name === "AbortError")
+      ? "Le Sheet met trop de temps à répondre — sauvegardé localement seulement, réessaie 'Actualiser' plus tard."
+      : "Sauvegardé localement seulement (échec de connexion au Sheet).";
+    statusEl.textContent = label;
+    setSyncStatus("Dernier enregistrement resté local — vérifie ta connexion puis Actualiser.", "error");
   }
 });
 
@@ -1166,19 +1216,30 @@ document.getElementById("btn-save-profiles").addEventListener("click", async ()=
   }
   statusEl.textContent = "Enregistrement…";
   try{
-    await fetch(api, {
-      method:"POST",
-      headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body: JSON.stringify({action:"savePostes", data: state.postes})
-    });
-    await fetch(api, {
-      method:"POST",
-      headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body: JSON.stringify({action:"saveProfiles", data:{educateur, profiles: state.profilesByEduc[educateur]}})
-    });
+    // Les deux écritures touchent des onglets différents et sont
+    // indépendantes : les lancer en parallèle plutôt qu'à la suite évite
+    // de payer deux fois le temps de trajet réseau.
+    await Promise.all([
+      apiFetch(api, {
+        method:"POST",
+        headers:{"Content-Type":"text/plain;charset=utf-8"},
+        body: JSON.stringify({action:"savePostes", data: state.postes})
+      }),
+      apiFetch(api, {
+        method:"POST",
+        headers:{"Content-Type":"text/plain;charset=utf-8"},
+        body: JSON.stringify({action:"saveProfiles", data:{educateur, profiles: state.profilesByEduc[educateur]}})
+      })
+    ]);
     statusEl.textContent = "Postes (communs) et profils techniques de " + educateur + " enregistrés dans le Google Sheet ✓";
+    lastSyncAt = new Date();
+    setSyncStatus("À jour (Sheet synchronisé à " + formatHeure(lastSyncAt) + ")", "ok");
   }catch(err){
-    statusEl.textContent = "Sauvegardés localement seulement (échec de connexion au Sheet).";
+    const label = (err && err.name === "AbortError")
+      ? "Le Sheet met trop de temps à répondre — sauvegardé localement seulement."
+      : "Sauvegardés localement seulement (échec de connexion au Sheet).";
+    statusEl.textContent = label;
+    setSyncStatus("Dernier enregistrement resté local — vérifie ta connexion puis Actualiser.", "error");
   }
 });
 
@@ -1190,20 +1251,8 @@ function formatDateFr(iso){
 }
 
 /* ---------- Onglet Historique ---------- */
-async function renderHistory(){
+function paintHistory(items){
   const el = document.getElementById("history-list");
-  el.innerHTML = "<p class='empty-hint'>Chargement…</p>";
-  let items = JSON.parse(localStorage.getItem(LS_HISTORY) || "[]");
-
-  const api = getApiUrl();
-  if(api){
-    try{
-      const res = await fetch(api + "?action=getHistory");
-      const json = await res.json();
-      if(Array.isArray(json) && json.length) items = json;
-    }catch(err){ /* on garde l'historique local */ }
-  }
-
   if(!items.length){
     el.innerHTML = "<p class='empty-hint'>Aucune semaine enregistrée pour l'instant.</p>";
     return;
@@ -1240,6 +1289,43 @@ async function renderHistory(){
   });
 }
 
+async function refreshHistoryFromApi(){
+  const api = getApiUrl();
+  if(!api) return false;
+  try{
+    const res = await apiFetch(api + "?action=getHistory");
+    const json = await res.json();
+    if(Array.isArray(json)){
+      state.historyCache = json;
+      localStorage.setItem(LS_HISTORY, JSON.stringify(json));
+      return true;
+    }
+  }catch(err){ /* réseau indisponible : on garde le cache tel quel */ }
+  return false;
+}
+
+async function renderHistory(){
+  const el = document.getElementById("history-list");
+  // Affiche tout de suite ce qu'on a déjà (cache local), pour que l'écran
+  // ne reste jamais bloqué sur "Chargement…" en cas de réseau lent —
+  // puis va chercher la version à jour en tâche de fond et rafraîchit
+  // l'affichage silencieusement si elle diffère.
+  if(state.historyCache.length){
+    paintHistory(state.historyCache);
+  } else {
+    el.innerHTML = "<p class='empty-hint'>Chargement…</p>";
+  }
+  const ok = await refreshHistoryFromApi();
+  paintHistory(state.historyCache);
+  if(!ok && getApiUrl()){
+    const warn = document.createElement("p");
+    warn.className = "empty-hint";
+    warn.style.color = "var(--red-chalk)";
+    warn.textContent = "Connexion au Sheet impossible pour l'instant — historique affiché depuis cet appareil, potentiellement pas à jour.";
+    el.prepend(warn);
+  }
+}
+
 /* ---------- Paramètres API ---------- */
 document.getElementById("api-url").value = getApiUrl();
 document.getElementById("btn-save-url").addEventListener("click", ()=>{
@@ -1251,10 +1337,11 @@ document.getElementById("btn-test-url").addEventListener("click", async ()=>{
   const statusEl = document.getElementById("api-status");
   if(!api){ statusEl.textContent = "Aucune URL enregistrée."; return; }
   statusEl.textContent = "Test en cours…";
+  const startedAt = Date.now();
   try{
-    const res = await fetch(api + "?action=ping");
+    const res = await apiFetch(api + "?action=ping");
     const txt = await res.text();
-    statusEl.textContent = "Connexion OK : " + txt.slice(0,80);
+    statusEl.textContent = "Connexion OK (" + (Date.now()-startedAt) + " ms) : " + txt.slice(0,80);
   }catch(err){
     statusEl.textContent = "Échec de connexion — vérifie que le script est bien déployé en accès public.";
   }
@@ -1266,35 +1353,73 @@ renderAttrList();
 renderEducTabs();
 renderProfiles();
 
-async function loadProfilesFromApi(){
+// Un seul aller-retour réseau (action "getAll") au lieu de 3-4 séparés :
+// c'est le principal gain de vitesse, chaque appel Apps Script payant un
+// temps de démarrage fixe qu'on ne payait auparavant plusieurs fois de suite.
+let syncInFlight = null;
+async function syncAll(opts){
+  const silent = opts && opts.silent;
   const api = getApiUrl();
-  if(!api) return;
-  try{
-    const [resPostes, resProfiles] = await Promise.all([
-      fetch(api + "?action=getPostes"),
-      fetch(api + "?action=getProfiles")
-    ]);
-    const jsonPostes = await resPostes.json();
-    if(jsonPostes && typeof jsonPostes === "object" && Object.keys(jsonPostes).length){
-      PLAYERS.forEach(name=>{
-        if(jsonPostes[name]) state.postes[name] = ensurePosteFields({...jsonPostes[name]});
-      });
+  if(!api){ setSyncStatus("Aucune connexion au Sheet configurée.", "error"); return; }
+  if(syncInFlight) return syncInFlight; // évite les appels concurrents (ex: retour d'onglet + clic Actualiser)
+  if(!silent) setSyncStatus("Synchronisation…", "loading");
+  syncInFlight = (async ()=>{
+    try{
+      const res = await apiFetch(api + "?action=getAll");
+      const json = await res.json();
+      if(json && json.error) throw new Error(json.error);
+
+      if(json.postes && typeof json.postes === "object"){
+        PLAYERS.forEach(name=>{
+          if(json.postes[name]) state.postes[name] = ensurePosteFields({...json.postes[name]});
+        });
+      }
+      if(json.profiles && typeof json.profiles === "object"){
+        EDUCATEURS.forEach(e=>{
+          if(json.profiles[e] && Object.keys(json.profiles[e]).length){
+            PLAYERS.forEach(name=>{
+              if(json.profiles[e][name]) state.profilesByEduc[e][name] = ensureAttrFields({...json.profiles[e][name]});
+            });
+          }
+        });
+      }
+      if(Array.isArray(json.history)){
+        state.historyCache = json.history;
+        localStorage.setItem(LS_HISTORY, JSON.stringify(json.history));
+      }
+
+      saveLocalData();
+      renderProfiles();
+      applySuggestedNum();
+      if(document.getElementById("tab-historique").classList.contains("active")){
+        paintHistory(state.historyCache);
+      }
+
+      lastSyncAt = new Date();
+      setSyncStatus("À jour (Sheet synchronisé à " + formatHeure(lastSyncAt) + ")", "ok");
+    }catch(err){
+      const label = (err && err.name === "AbortError")
+        ? "Le Sheet met trop de temps à répondre — données locales affichées."
+        : "Connexion au Sheet indisponible — données locales affichées.";
+      setSyncStatus(label, "error");
+    } finally {
+      syncInFlight = null;
     }
-    const jsonProfiles = await resProfiles.json();
-    if(jsonProfiles && typeof jsonProfiles === "object"){
-      EDUCATEURS.forEach(e=>{
-        if(jsonProfiles[e] && Object.keys(jsonProfiles[e]).length){
-          PLAYERS.forEach(name=>{
-            if(jsonProfiles[e][name]) state.profilesByEduc[e][name] = ensureAttrFields({...jsonProfiles[e][name]});
-          });
-        }
-      });
-    }
-    saveLocalData();
-    renderProfiles();
-  }catch(err){ /* on garde les données locales */ }
+  })();
+  return syncInFlight;
 }
-loadProfilesFromApi();
+
+document.getElementById("btn-refresh-all").addEventListener("click", ()=> syncAll());
+
+// Sur mobile/tablette, l'app reste souvent ouverte en arrière-plan : sans
+// ça, on continuerait d'afficher les données chargées à l'ouverture, même
+// si un autre éducateur a enregistré un groupe entre-temps sur son propre
+// appareil. On resynchronise donc à chaque retour au premier plan.
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState === "visible") syncAll({silent:true});
+});
+
+syncAll();
 </script>
 </body>
 </html>
