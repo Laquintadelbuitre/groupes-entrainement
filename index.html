@@ -975,8 +975,19 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
   const startRow = labelRow + 1;
   const maxPlayers = Math.max(...state.groups.map(g=>g.players.length));
 
+  // Chaque prénom occupe 5 colonnes de large, fusionnées en une seule case à
+  // l'affichage — donc le bloc du groupe N°gi démarre à la colonne gi*5+1 et
+  // s'étend sur 5 colonnes (gi*5+1 à gi*5+5).
+  const COLS_PER_GROUP = 5;
+
+  function mergedCell(row, groupIndex){
+    const startCol = groupIndex * COLS_PER_GROUP + 1;
+    const endCol = startCol + COLS_PER_GROUP - 1;
+    ws.mergeCells(row, startCol, row, endCol);
+    return ws.getCell(row, startCol);
+  }
+
   state.groups.forEach((grp, gi)=>{
-    const col = gi + 1;
     const colors = EXPORT_COLORS[gi % EXPORT_COLORS.length];
     let rowOffset = 0;
 
@@ -984,7 +995,7 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
     // numérotation ni préfixe "Groupe N —", en petite italique au-dessus
     // des noms, dans la même couleur que le reste du bloc.
     if(grp.objectif){
-      const objCell = ws.getRow(startRow).getCell(col);
+      const objCell = mergedCell(startRow, gi);
       objCell.value = grp.objectif;
       objCell.font = {italic:true, size:9, color:{argb:"FF555555"}};
       objCell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.body}};
@@ -993,12 +1004,16 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
     }
 
     grp.players.forEach((name, pi)=>{
-      const cell = ws.getRow(startRow + rowOffset + pi).getCell(col);
+      const cell = mergedCell(startRow + rowOffset + pi, gi);
       cell.value = name;
       cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.body}};
+      cell.alignment = {vertical:"middle"};
     });
 
-    ws.getColumn(col).width = 22;
+    const startCol = gi * COLS_PER_GROUP + 1;
+    for(let c = startCol; c < startCol + COLS_PER_GROUP; c++){
+      ws.getColumn(c).width = 4.4; // 5 colonnes × 4.4 ≈ largeur d'une case nom de 22 comme avant
+    }
   });
 
   for(let r = startRow; r <= startRow + maxPlayers + 1; r++){
