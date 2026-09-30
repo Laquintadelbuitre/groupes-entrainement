@@ -1034,10 +1034,9 @@ document.getElementById("btn-validate").addEventListener("click", async ()=>{
     groupes: state.groups.map(g=>({objectif:g.objectif, joueurs:g.players}))
   };
 
-  // sauvegarde locale systématique — un seul groupe conservé par jour,
-  // comme côté Sheet : on remplace l'entrée existante pour cette date
-  // plutôt que d'empiler un doublon.
-  state.historyCache = state.historyCache.filter(it => it.date !== date);
+  // sauvegarde locale systématique — chaque séance garde sa propre ligne,
+  // comme côté Sheet : plusieurs séances peuvent partager la même date sans
+  // s'écraser (les groupes varient selon les présences et l'objectif du jour).
   state.historyCache.unshift(payload);
   localStorage.setItem(LS_HISTORY, JSON.stringify(state.historyCache));
 
