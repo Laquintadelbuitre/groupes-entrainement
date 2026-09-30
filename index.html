@@ -292,7 +292,6 @@
           <button data-mode="homogene" class="active">Homogène</button>
           <button data-mode="mixte">Mixte</button>
           <button data-mode="opposition">Opposition par poste</button>
-          <button data-mode="homogene_opposition">Homogène + opposition interne</button>
         </div>
         <p class="status-msg" id="mode-explain">Les niveaux proches sont regroupés ensemble (ex. toros par niveau).</p>
       </div>
@@ -306,10 +305,6 @@
           <option value="size">Taille par groupe</option>
         </select>
         <input type="number" id="group-input-value" min="2" max="11" value="3" style="width:70px;">
-      </div>
-      <div id="panel-homogene-opposition-extra" style="display:none; margin-top:16px;">
-        <span class="field-label">Attribut de l'opposition interne (chaque groupe homogène est coupé en 2, sur cet attribut)</span>
-        <select id="inner-opposition-attr"></select>
       </div>
       <div class="actions-row" style="justify-content:flex-start; margin-top:16px;">
         <button class="btn" id="btn-generate">Générer les groupes</button>
@@ -353,6 +348,16 @@
         <button class="btn primary" id="btn-validate">Valider et enregistrer la semaine</button>
       </div>
       <p class="status-msg" id="save-status"></p>
+
+      <div class="settings-box" style="margin-top:24px;">
+        <h2 style="margin-top:0;">6 · Sous-groupes internes (facultatif)</h2>
+        <span class="field-label">Scinde chaque groupe ci-dessus en 2 équipes opposées sur un attribut additionnel (ex. groupes homogènes en technique, puis opposition par vitesse à l'intérieur de chacun)</span>
+        <div class="chip-row" style="align-items:center; margin-top:10px;">
+          <select id="subgroup-attr"></select>
+          <button class="btn" id="btn-subgroups">Scinder en sous-groupes</button>
+          <button class="btn small" id="btn-subgroups-undo" style="display:none;">Revenir aux groupes initiaux</button>
+        </div>
+      </div>
     </div>
 
   </section>
@@ -418,8 +423,7 @@ const LEVELS = [
   {key:"fort", label:"Fort", val:3}
 ];
 const POSTES = ["Gardien","Défenseur","Milieu","Attaquant"];
-const LEVEL_ORDER = ["fort","moyen","travail"]; // display order left->right in profile row (Fort left as most desirable? keep travail,moyen,fort reading order)
-const DISPLAY_ORDER = ["fort","moyen","travail"];
+const DISPLAY_ORDER = ["fort","moyen","travail"]; // ordre d'affichage gauche->droite dans la ligne de profil
 
 const PRINCIPES_PAR_PHASE = {
   "Conserver / Progresser": [
@@ -507,9 +511,6 @@ function formatHeure(d){
   return d.getHours().toString().padStart(2,"0") + "h" + d.getMinutes().toString().padStart(2,"0");
 }
 
-function defaultPostes(){
-  return {poste_principal:"Milieu", secteur_principal:"", poste_secondaire:"", secteur_secondaire:""};
-}
 function defaultAttrs(){
   const o = {};
   ATTRS.forEach(a => o[a.key] = "moyen");
@@ -641,8 +642,8 @@ function renderAttrList(){
 }
 
 /* ---------- Mode toggle ---------- */
-function renderInnerOppositionAttrSelect(){
-  const sel = document.getElementById("inner-opposition-attr");
+function renderSubgroupAttrSelect(){
+  const sel = document.getElementById("subgroup-attr");
   if(sel.options.length) return; // déjà rempli
   ATTRS.forEach(a=>{
     const opt = document.createElement("option");
@@ -650,7 +651,7 @@ function renderInnerOppositionAttrSelect(){
     sel.appendChild(opt);
   });
 }
-renderInnerOppositionAttrSelect();
+renderSubgroupAttrSelect();
 
 document.querySelectorAll("#mode-toggle button").forEach(btn=>{
   btn.addEventListener("click", ()=>{
@@ -660,11 +661,9 @@ document.querySelectorAll("#mode-toggle button").forEach(btn=>{
     const explain = document.getElementById("mode-explain");
     if(state.mode === "homogene") explain.textContent = "Les niveaux proches sont regroupés ensemble (ex. toros par niveau).";
     else if(state.mode === "mixte") explain.textContent = "Chaque groupe reçoit un mélange de niveaux équilibré (ex. jeux collectifs mixtes).";
-    else if(state.mode === "homogene_opposition") explain.textContent = "Des groupes homogènes sont formés comme en mode Homogène, puis chacun est coupé en 2 équipes qui s'affrontent sur l'attribut choisi ci-dessous.";
     else explain.textContent = "Deux camps définis par poste s'affrontent, appariés par niveau (ex. défenseurs forts vs attaquants forts).";
     document.getElementById("panel-count").style.display = (state.mode === "opposition") ? "none" : "block";
     document.getElementById("panel-opposition").style.display = (state.mode === "opposition") ? "block" : "none";
-    document.getElementById("panel-homogene-opposition-extra").style.display = (state.mode === "homogene_opposition") ? "block" : "none";
   });
 });
 
@@ -788,8 +787,10 @@ document.getElementById("btn-generate-opposition").addEventListener("click", ()=
   }
 
   state.groups = groups;
+  state.groupsBase = null;
   state.picked = null;
   renderGroups();
+  updateSubgroupUndoVisibility();
   document.getElementById("groups-panel").style.display = "block";
   document.getElementById("groups-panel").scrollIntoView({behavior:"smooth", block:"start"});
 });
@@ -838,9 +839,9 @@ document.getElementById("btn-generate").addEventListener("click", ()=>{
 
   let groups;
 
-  if(state.mode === "homogene" || state.mode === "homogene_opposition"){
-    // découpage en tranches contiguës de niveau — la base commune aux deux modes
-    const brackets = Array.from({length:nGroups}, ()=>[]);
+  if(state.mode === "homogene"){
+    // découpage en tranches contiguës de niveau
+    groups = Array.from({length:nGroups}, ()=>({objectif:"", players:[]}));
     const base = Math.floor(ranked.length / nGroups);
     let rest = ranked.length % nGroups;
     let idx = 0;
@@ -848,34 +849,9 @@ document.getElementById("btn-generate").addEventListener("click", ()=>{
       const size = base + (rest > 0 ? 1 : 0);
       if(rest>0) rest--;
       for(let k=0;k<size;k++){
-        brackets[g].push(ranked[idx].name);
+        groups[g].players.push(ranked[idx].name);
         idx++;
       }
-    }
-
-    if(state.mode === "homogene"){
-      groups = brackets.map(players => ({objectif:"", players}));
-    } else {
-      // Homogène + opposition interne : chaque groupe homogène (même niveau
-      // global) est ensuite coupé en 2 équipes sur un attribut séparé, pour
-      // des duels équilibrés en niveau mais opposés sur la qualité choisie.
-      const innerKey = document.getElementById("inner-opposition-attr").value;
-      const innerLabel = (ATTRS.find(a=>a.key===innerKey) || {}).label || innerKey;
-      groups = [];
-      brackets.forEach((bracketPlayers, bi)=>{
-        if(bracketPlayers.length < 2){
-          groups.push({objectif:"Niveau " + (bi+1) + " — effectif trop réduit pour une opposition", players: bracketPlayers});
-          return;
-        }
-        const sortedByInner = bracketPlayers
-          .map(name => ({name, val: levelVal(name, innerKey)}))
-          .sort((a,b)=> b.val - a.val);
-        const half = Math.ceil(sortedByInner.length / 2);
-        const forts = sortedByInner.slice(0, half).map(r=>r.name);
-        const autres = sortedByInner.slice(half).map(r=>r.name);
-        groups.push({objectif:"Niveau " + (bi+1) + " — " + innerLabel + " (forts)", players: forts});
-        groups.push({objectif:"Niveau " + (bi+1) + " — " + innerLabel + " (à travailler)", players: autres});
-      });
     }
   } else {
     // Mixte : snake draft pour équilibrer le niveau moyen de chaque groupe
@@ -890,10 +866,66 @@ document.getElementById("btn-generate").addEventListener("click", ()=>{
   }
 
   state.groups = groups;
+  state.groupsBase = null;
   state.picked = null;
   renderGroups();
+  updateSubgroupUndoVisibility();
   document.getElementById("groups-panel").style.display = "block";
   document.getElementById("groups-panel").scrollIntoView({behavior:"smooth", block:"start"});
+});
+
+/* ---------- Étape 6 (facultative) : sous-groupes internes ---------- */
+state.groupsBase = null;
+
+function splitGroupsByAttr(baseGroups, attrKey){
+  const label = (ATTRS.find(a=>a.key===attrKey) || {}).label || attrKey;
+  const result = [];
+  baseGroups.forEach((grp, gi)=>{
+    if(grp.players.length < 2){
+      result.push({objectif: grp.objectif, players: [...grp.players]});
+      return;
+    }
+    const sorted = grp.players
+      .map(name => ({name, val: levelVal(name, attrKey)}))
+      .sort((a,b)=> b.val - a.val);
+    const half = Math.ceil(sorted.length / 2);
+    const forts = sorted.slice(0, half).map(r=>r.name);
+    const autres = sorted.slice(half).map(r=>r.name);
+    const prefix = grp.objectif ? grp.objectif + " — " : "Groupe " + (gi+1) + " — ";
+    result.push({objectif: prefix + label + " (forts)", players: forts});
+    result.push({objectif: prefix + label + " (à travailler)", players: autres});
+  });
+  return result;
+}
+
+function updateSubgroupUndoVisibility(){
+  document.getElementById("btn-subgroups-undo").style.display = state.groupsBase ? "inline-block" : "none";
+}
+
+document.getElementById("btn-subgroups").addEventListener("click", ()=>{
+  if(!state.groups || !state.groups.length){
+    alert("Génère d'abord les groupes (étape 5).");
+    return;
+  }
+  // On fige les groupes courants (avant scission) la première fois seulement,
+  // pour pouvoir re-scinder sur un autre attribut sans empiler les découpages.
+  if(!state.groupsBase){
+    state.groupsBase = state.groups.map(g => ({objectif: g.objectif, players: [...g.players]}));
+  }
+  const attrKey = document.getElementById("subgroup-attr").value;
+  state.groups = splitGroupsByAttr(state.groupsBase, attrKey);
+  state.picked = null;
+  renderGroups();
+  updateSubgroupUndoVisibility();
+});
+
+document.getElementById("btn-subgroups-undo").addEventListener("click", ()=>{
+  if(!state.groupsBase) return;
+  state.groups = state.groupsBase;
+  state.groupsBase = null;
+  state.picked = null;
+  renderGroups();
+  updateSubgroupUndoVisibility();
 });
 
 function dominantLevelClass(name){
