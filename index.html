@@ -963,20 +963,37 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
     ws.getCell("A2").font = {italic:true, size:11, color:{argb:"FF555555"}};
   }
 
-  const startRow = 4;
+  // Bloc "CONSIGNES" : reproduit la case fusionnée de la fiche séance, une
+  // fois défusionnée en 3 blocs de couleur (un par groupe) — chaque bloc ne
+  // contient que les prénoms, empilés, sans étiquette "Groupe N", pour se
+  // coller/copier tel quel dans la fiche.
+  const labelRow = 4;
+  ws.getCell(labelRow, 1).value = "CONSIGNES";
+  ws.getCell(labelRow, 1).font = {bold:true, size:11};
+  ws.getCell(labelRow, 1).fill = {type:"pattern", pattern:"solid", fgColor:{argb:"FFE5E5E5"}};
+
+  const startRow = labelRow + 1;
   const maxPlayers = Math.max(...state.groups.map(g=>g.players.length));
 
   state.groups.forEach((grp, gi)=>{
     const col = gi + 1;
     const colors = EXPORT_COLORS[gi % EXPORT_COLORS.length];
-    const headerCell = ws.getRow(startRow).getCell(col);
-    headerCell.value = "Groupe " + (gi+1) + (grp.objectif ? " — " + grp.objectif : "");
-    headerCell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.header}};
-    headerCell.font = {bold:true, color:{argb:"FF1B1B1B"}};
-    headerCell.alignment = {wrapText:true, vertical:"middle"};
+    let rowOffset = 0;
+
+    // L'objectif du groupe, s'il est renseigné, reste affiché mais sans
+    // numérotation ni préfixe "Groupe N —", en petite italique au-dessus
+    // des noms, dans la même couleur que le reste du bloc.
+    if(grp.objectif){
+      const objCell = ws.getRow(startRow).getCell(col);
+      objCell.value = grp.objectif;
+      objCell.font = {italic:true, size:9, color:{argb:"FF555555"}};
+      objCell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.body}};
+      objCell.alignment = {wrapText:true, vertical:"middle"};
+      rowOffset = 1;
+    }
 
     grp.players.forEach((name, pi)=>{
-      const cell = ws.getRow(startRow + 1 + pi).getCell(col);
+      const cell = ws.getRow(startRow + rowOffset + pi).getCell(col);
       cell.value = name;
       cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:colors.body}};
     });
@@ -984,7 +1001,7 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
     ws.getColumn(col).width = 22;
   });
 
-  for(let r = startRow; r <= startRow + maxPlayers; r++){
+  for(let r = startRow; r <= startRow + maxPlayers + 1; r++){
     ws.getRow(r).height = 20;
   }
 
